@@ -39,22 +39,25 @@ Decisions already made:
 - [x] Step 5, right panel: drag a number label to change it, Track section (name, mute, solo, hide, lock),
       edit several selected clips at once.
 
+- [x] Leftovers: panel start/duration edits follow the overlap rule (when the edit is done); paste and
+      duplicate go to a new track like a drop; playback stops at the out marker; Magnet closes the gap a
+      clip leaves when it moves to another track; Magnet and Overwrite are kept after reload; a linked pair
+      moves across tracks (each clip over tracks of its own type); the server says if a video has sound
+      (`/api/probe`, ffprobe); a held arrow key is one undo step; the scene selection box skips hidden
+      elements; several selected clips with different values show "mixed".
+
+- [x] Markers: `M` add, `Shift+M` / `Ctrl+Shift+M` next / previous, drag, name and color (double-click),
+      delete (`Alt`+click, right-click); clips snap to them. Magnet moved to `N`.
+- [x] Fix: a seek while the project still loads its audio no longer throws (stage gets the timeline first).
+
 ## Now
 
-- [ ] Leftovers below, then keyframes.
+- [ ] Keyframes.
 
 ## Timeline leftovers
 
-- [ ] Typing a new `start` in the right panel can still make clips overlap (only pointer edits are checked).
-- [ ] Paste and duplicate still go to the nearest free spot with Overwrite off (not to a new track).
-- [ ] Preview playback does not stop at the out marker.
-- [ ] Magnet does not close the gap a moved clip leaves behind (only delete and trims ripple).
-- [ ] Magnet and Overwrite reset to off on page reload.
-
-## Track leftovers
-
-- [ ] A linked pair cannot move to another track together (only one clip, with `Alt`, can change track).
-- [ ] The sound of a video is found by decoding the whole file in the browser; ask the server (ffprobe) for big files.
+- [ ] Magnet within one track does not reorder clips (no insert edit); a move there is free, as with Magnet off.
+- [ ] A video's sound is still decoded whole in the browser for the waveform and playback; huge files load slowly.
 
 ## Step 4: sidebar
 
@@ -71,12 +74,7 @@ Decisions already made:
 - [x] Track section: name, mute, solo, lock, hide.
 - [x] Link/unlink action for linked clips (done in step 3).
 - [x] Edit several selected clips at once.
-- [ ] Panel leftover: with several clips, a field shows the main clip's value only (no "mixed" state).
-
-## Canvas leftovers
-
-- [ ] Holding an arrow key makes one undo step per key repeat; merge them into one.
-- [ ] Scene selection box uses every element in the scene; hidden large elements make it too big.
+- [x] Panel leftover: several clips with different values show "mixed".
 
 ## Later
 

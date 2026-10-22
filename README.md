@@ -119,8 +119,13 @@ Timeline:
   onto another cuts the covered part (trim, split, or remove). Trims always stop at the end of the source file.
 - Drag a scene card or a media tile from the sidebar onto the timeline: it lands on that track at that time
   (below the last track: on a new track).
-- Magnet `M` (toolbar toggle), on: delete and edge trims close the gap (ripple), the clips after follow.
-  Off: gaps stay. Hold `Shift` while deleting or trimming to do the other way.
+- Markers: `M` adds one at the playhead (stored as `timeline.markers`), `Shift+M` / `Ctrl+Shift+M` go to the
+  next / previous one (`Up` / `Down` stop at markers too). On the ruler: click a marker to go there, drag to
+  move it (it snaps), double-click for its name and color, `Alt`+click or right-click to delete. Clips snap to markers.
+- Magnet `N` (toolbar toggle), on: delete and edge trims close the gap (ripple), the clips after follow; a
+  clip moved to another track leaves no gap behind. Off: gaps stay. Hold `Shift` to do the other way.
+  Magnet and Overwrite stay as set after a reload.
+- Paste, duplicate and panel edits of `start` / `duration` follow the same rule as a drop.
 - `Space` play/pause, `J` play backward (no sound), `K` pause, `L` play. `Left`/`Right` step a frame
   (`Shift` = 1 s), `Up`/`Down` jump to the previous/next clip edge, `Home`/`End` go to start/end.
 - `Delete` removes the selection (gap stays, or closes with Magnet on); `Shift+Delete` does the other way.
@@ -134,7 +139,7 @@ Timeline:
   unlinks it. In `timeline.json` linked clips share a `link` id; a clip on an audio track always plays as
   audio, also when its `src` is a video file.
 - `I` / `O` set the export range in / out at the playhead (blue band in the ruler, stored as `timeline.range`);
-  `Alt+X` clears it. The export renders only that range.
+  `Alt+X` clears it. The export renders only that range, and playback started before the out marker stops there.
 `Ctrl+Z` undo, `Ctrl+Shift+Z` or `Ctrl+Y` redo (100 steps; one drag is one step; an outside edit of `timeline.json` is undoable too).
 
 Right panel: drag a number field's label left or right to change it (`Shift` faster, `Alt` finer). With
@@ -149,6 +154,7 @@ selected clip 1 px (`Shift` = 10 px); after a click in the timeline they step fr
 
 ## Known limits
 
-- The sound of a video is found by decoding the whole file in the browser, so very large videos load slowly.
+- The server checks if a video has sound (`ffprobe`); its sound is then decoded whole in the browser for the
+  waveform and playback, so very large videos load slowly.
 - Export renders PNG frames through Chrome, so it is slow for long timelines.
 - Undo history lives in the browser tab and is lost on reload; keep `timeline.json` in git.

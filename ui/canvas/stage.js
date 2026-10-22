@@ -113,9 +113,12 @@ export function createStage(root, base = "/p/") {
       if (n.k === "scene") {
         let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
         try {
+          const style = n.el.contentWindow.getComputedStyle;
           for (const e of n.el.contentDocument.body.querySelectorAll("*")) {
             const q = e.getBoundingClientRect();
             if (!q.width || !q.height) continue;
+            const s = style(e);
+            if (s.visibility === "hidden" || s.opacity === "0") continue; // not seen, so not part of the box
             l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
           }
         } catch { return null; }

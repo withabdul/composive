@@ -41,7 +41,8 @@ export function ui() {
 function tick() {
   if (!S.playing) return;
   S.t = S.t0 + Math.max(0, actx.currentTime - S.ctxT0);
-  if (S.t >= totalDur()) { S.t = totalDur(); pause(); return; }
+  const out = S.tl.range?.out, end = out != null && S.t0 < out ? out : totalDur(); // stop at the out marker when started before it
+  if (S.t >= end) { S.t = end; pause(); return; }
   stage.render(S.t, true);
   ui();
   drawMeter();

@@ -4,7 +4,7 @@
 // clip and an edit applies to all of them (start moves them all by the same amount).
 import { $, S, el, MIN, bus, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack } from "../core/edit.js";
+import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place } from "../core/edit.js";
 import { ui } from "../canvas/viewer.js";
 
 const FALLBACK = { offset: 0, fadeIn: 0, fadeOut: 0, volume: 1 };
@@ -70,6 +70,7 @@ function scrub(name, input) {
     };
     name.onpointerup = () => {
       name.onpointermove = name.onpointerup = null;
+      settle(input.dataset.path);
       if (JSON.stringify(S.tl) !== snap0) { pushUndo(snap0); ui(); }
     };
   };
@@ -185,11 +186,15 @@ function trackGroup(tr) {
 }
 
 function sync(c) {
+  const cs = selected();
   for (const input of body.querySelectorAll("[data-path]")) {
     if (input === document.activeElement) continue;
-    const v = read(c, input.dataset.path);
-    if (input.type === "checkbox") input.checked = !!v;
-    else input.value = v ?? "";
+    const path = input.dataset.path, v = read(c, path);
+    // several clips with different values: show "mixed" (start is relative, it shows the main clip)
+    const mixed = cs.length > 1 && path !== "start" && cs.some((x) => read(x, path) !== v);
+    input.placeholder = mixed ? "mixed" : "";
+    if (input.type === "checkbox") { input.checked = !!v; input.indeterminate = mixed; }
+    else input.value = mixed ? "" : v ?? "";
   }
   const json = $("#pJson");
   if (json && json !== document.activeElement) json.value = JSON.stringify(c, null, 2);
@@ -241,7 +246,14 @@ const flush = () => {
   if (focusSnap && JSON.stringify(S.tl) !== focusSnap) { pushUndo(focusSnap); ui(); }
   focusSnap = JSON.stringify(S.tl);
 };
-body.addEventListener("change", flush);
+// When a new start or duration is done (not on every key, or each digit could make a track): clips that
+// now cover others follow the timeline rule (Overwrite cuts, else a new track).
+function settle(path) {
+  if (path !== "start" && path !== "duration") return;
+  place(selected());
+  commit();
+}
+body.addEventListener("change", (e) => { settle(e.target.dataset.path); flush(); });
 body.addEventListener("focusout", flush);
 
 $("#pClose").onclick = () => { closedFor = S.sel; render(); };

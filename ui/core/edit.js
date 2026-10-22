@@ -61,22 +61,6 @@ export function removeClips(cs, ripple = false, linked = true) {
 }
 export const removeClip = (c) => removeClips([c]);
 
-// Clips may not overlap on a track. `group` = [{ c, o }] (o = the clip before the move). Returns `want`
-// if the group fits there, else the nearest shift that fits (next to a blocking clip), else null.
-export function freeDt(group, want) {
-  const moving = new Set(group.map((g) => g.c));
-  const fits = (dt) => group.every(({ c, o }) => {
-    const s = o.start + dt, e = s + o.duration;
-    return s >= -EPS && trackOf(c).clips.every((x) => moving.has(x) || x.start >= e - EPS || x.start + x.duration <= s + EPS);
-  });
-  if (fits(want)) return want;
-  const tries = [];
-  for (const { c, o } of group) {
-    for (const x of trackOf(c).clips) if (!moving.has(x)) tries.push(x.start - o.duration - o.start, x.start + x.duration - o.start);
-  }
-  return tries.filter(fits).sort((a, b) => Math.abs(a - want) - Math.abs(b - want))[0] ?? null;
-}
-
 // Overwrite: the `top` clips cut the parts of other clips on their track that they cover
 // (trim a head or tail, split if covered in the middle, remove if covered fully).
 export function carve(top) {
@@ -107,18 +91,9 @@ export function carve(top) {
   }
 }
 
-// New clips that may overlap others: overwrite mode cuts the others; else shift the new clips
-// as a group to the nearest free place, else after everything.
-function place(made) {
-  if (S.overwrite) return carve(made);
-  const group = made.map((c) => ({ c, o: { ...c } }));
-  let dt = freeDt(group, 0);
-  if (dt === null) {
-    const others = clips().filter((x) => !made.includes(x));
-    dt = Math.max(0, ...others.map((x) => x.start + x.duration)) - Math.min(...made.map((c) => c.start));
-  }
-  for (const c of made) c.start = snap(c.start + dt);
-}
+// Clips that landed on a used spot (a drop, paste, panel edit): Overwrite cuts the clips there, else
+// they go to a new track next to it. Clips never overlap on a track.
+export const place = (cs) => (S.overwrite ? carve : bump)(cs);
 
 /* ---------- tracks ---------- */
 
@@ -252,6 +227,41 @@ export function duplicate(cs) {
 }
 export const duplicateClip = (c) => duplicate(withLinked([c]));
 
+/* ---------- markers ---------- */
+
+// Markers (`timeline.markers`: { id, t, name?, color? }) are named points in time on the ruler.
+export const MARKER_COLOR = "#ff9f43";
+
+export function addMarker(t) {
+  t = snap(t);
+  if (S.tl.markers?.some((m) => Math.abs(m.t - t) < EPS)) return; // one marker per frame
+  record();
+  (S.tl.markers ??= []).push({ id: uid(), t });
+  S.tl.markers.sort((a, b) => a.t - b.t);
+  commit();
+}
+
+export function setMarker(id, patch) {
+  const m = S.tl.markers?.find((x) => x.id === id);
+  if (!m) return;
+  const next = { ...m, ...patch };
+  if (!next.name) delete next.name;
+  if (!next.color || next.color === MARKER_COLOR) delete next.color;
+  if (JSON.stringify(next) === JSON.stringify(m)) return;
+  record();
+  Object.assign(m, next);
+  for (const k of ["name", "color"]) if (!(k in next)) delete m[k];
+  commit();
+}
+
+export function removeMarker(id) {
+  if (!S.tl.markers?.some((m) => m.id === id)) return;
+  record();
+  S.tl.markers = S.tl.markers.filter((m) => m.id !== id);
+  if (!S.tl.markers.length) delete S.tl.markers;
+  commit();
+}
+
 /* ---------- range ---------- */
 
 // In/out markers (`timeline.range`): the export renders only this part.
@@ -298,15 +308,21 @@ async function probe(src) {
   return 3;
 }
 
+// The server says if a file has sound (ffprobe), so a silent video is not decoded; without ffprobe
+// the browser tries to decode it, which fails quietly when there is no sound.
+async function hasSound(src) {
+  const r = await fetch("/api/probe?src=" + encodeURIComponent(src)).catch(() => null);
+  return r?.ok ? (await r.json()).audio : true; // unknown: try to decode
+}
+
 // A video with sound also gets its sound as a linked clip on an audio track (free at that time).
-// shortcut: the sound is found by decoding the whole file; for very large videos ask the server (ffprobe)
 // `at` = { t, track } for a drop on the timeline: start at t on that track. Where it is used, Overwrite
 // cuts the clips there, else the clip goes to a new track next to it. A drop below the tracks (no track)
 // makes a new track. Without `at`: the end of the first track of its type.
 export async function addClip(src, at) {
   const k = kind(src), type = k === "audio" ? "audio" : "video";
   const duration = await probe(src);
-  if (k === "video") await loadAudio(src); // fails quietly when the file has no sound
+  if (k === "video" && (await hasSound(src))) await loadAudio(src);
   const sound = k === "video" && !!S.bufs.get(src);
   record();
   let tr, start;
@@ -325,7 +341,7 @@ export async function addClip(src, at) {
   }
   const c = { id: uid(), src, start, duration };
   tr.clips.push(c);
-  if (at) S.overwrite ? carve([c]) : bump([c]);
+  if (at) place([c]);
   if (sound) {
     const a = { id: uid(), src, start, duration, link: uid() };
     c.link = a.link;

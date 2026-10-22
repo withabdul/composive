@@ -159,7 +159,14 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 .edge.l { left: 0; } .edge.r { right: 0; }
 .fh { position: absolute; top: 2px; width: 10px; height: 10px; margin-left: -5px; background: #fff; border-radius: 50%; cursor: ew-resize; z-index: 4; }
 .fh.out { margin-left: 0; margin-right: -5px; }
-.range { position: absolute; top: 0; bottom: 0; background: rgba(91,157,255,.22); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); pointer-events: none; }
+/* marker: a pin on the ruler (--c = its color), with its name next to it */
+.mk { position: absolute; top: 0; z-index: 2; width: 10px; height: 100%; margin-left: -5px; cursor: grab; }
+.mk::before { content: ""; position: absolute; left: 0; top: 0; width: 10px; height: 14px; background: var(--c); clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); }
+.mk span { position: absolute; left: 12px; top: 1px; font-size: 10px; font-style: normal; color: var(--c); white-space: nowrap; pointer-events: none; }
+.mkpop { position: fixed; z-index: 100; display: flex; gap: 6px; align-items: center; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.mkpop input:not([type="color"]) { width: 160px; padding: 3px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.mkpop input[type="color"] { width: 28px; height: 24px; padding: 0; border: 0; background: none; }
+.range {position: absolute; top: 0; bottom: 0; background: rgba(91,157,255,.22); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); pointer-events: none; }
 .clip canvas.film { opacity: .55; }
 #snapline { position: absolute; top: 0; bottom: 0; width: 1px; background: #ffd23f; pointer-events: none; z-index: 11; }
 #marquee { position: absolute; background: rgba(91,157,255,.15); border: 1px solid var(--accent); pointer-events: none; z-index: 12; }

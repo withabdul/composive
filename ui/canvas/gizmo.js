@@ -134,10 +134,11 @@ function guide(g, side, at) {
 }
 
 // Arrow keys move the selected clip by 1 stage pixel (10 with Shift). Returns false if it cannot move.
-export function nudge(dx, dy) {
+// A held key repeats: only its first press records an undo step, so one hold = one step.
+export function nudge(dx, dy, repeat = false) {
   const c = S.sel && findClip(S.sel);
   if (!c || !draggable(c) || !(S.t >= c.start && S.t < c.start + c.duration)) return false;
-  record();
+  if (!repeat) record();
   c.props = {
     ...c.props,
     x: round(clamp(val(c, "x") + dx / S.tl.width, 0, 1)),

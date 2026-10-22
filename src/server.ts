@@ -90,6 +90,19 @@ export function serve(dir: string, port = 9999) {
         return Response.json({ path: rel });
       }
 
+      // Does a media file have a sound stream? (ffprobe; 404 when ffprobe is missing, the client then decodes)
+      if (pathname === "/api/probe") {
+        try {
+          const file = safe(root, "/" + encodeURIComponent(searchParams.get("src") ?? "").replaceAll("%2F", "/"));
+          if (!file || !existsSync(file)) return new Response("not found", { status: 404 });
+          const r = Bun.spawnSync(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", file]);
+          if (r.exitCode !== 0) return new Response("ffprobe failed", { status: 404 });
+          return Response.json({ audio: !!r.stdout.toString().trim() });
+        } catch {
+          return new Response("no ffprobe", { status: 404 }); // also a bad path
+        }
+      }
+
       if (pathname === "/") return sendFile(req, join(UI, "index.html"));
       if (pathname === "/render") return sendFile(req, join(UI, "render.html"));
       if (pathname.startsWith("/ui/")) return sendFile(req, safe(UI, pathname.slice(3)));

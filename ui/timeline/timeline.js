@@ -1,7 +1,7 @@
 // Timeline: drawing (ruler, range, rows, clips, waveform, filmstrip, fades) and pointer interaction for the four tools.
 import { $, S, bus, redraw, el, clamp, kind, clipKind, DRAG_SRC, clips, findClip, trackOf, locked, withLinked, isSel, selIds, selected, setSel, snap, totalDur, stage, LABEL, ROW, MIN, EPS } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, renameTrack } from "../core/edit.js";
+import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, renameTrack, setMarker, removeMarker, MARKER_COLOR } from "../core/edit.js";
 import { seek, ui } from "../canvas/viewer.js";
 import { strip, FRAME_H } from "./filmstrip.js";
 
@@ -45,6 +45,16 @@ function drawTimeline() {
     const t = el("div", "tick", s + "s");
     t.style.left = LABEL + s * S.pps + "px";
     ruler.append(t);
+  }
+  for (const m of S.tl.markers ?? []) {
+    if (m.t < view.a || m.t > view.b) continue;
+    const mk = el("i", "mk");
+    mk.dataset.id = m.id;
+    mk.style.left = LABEL + m.t * S.pps + "px";
+    mk.style.setProperty("--c", m.color || MARKER_COLOR);
+    mk.title = (m.name ? m.name + "\n" : "") + "Click: go here. Drag: move. Double-click: name and color. Alt+click or right-click: delete.";
+    if (m.name) mk.append(el("span", "", m.name));
+    ruler.append(mk);
   }
   const r = S.tl.range;
   if (r) {
@@ -189,9 +199,10 @@ function magnet(d, edges, dt, base, e) {
   return snap(base + dt) - base;
 }
 
-// playhead, 0 and the edges of every clip not being dragged
+// playhead, 0, markers and the edges of every clip not being dragged
 function targets(skip) {
   const out = [0, S.t];
+  for (const m of S.tl.markers ?? []) if (!skip.has(m)) out.push(m.t);
   for (const c of clips()) if (!skip.has(c)) out.push(c.start, c.start + c.duration);
   return out;
 }
@@ -221,6 +232,13 @@ sc.addEventListener("pointerdown", (e) => {
   sc.setPointerCapture(e.pointerId);
   if (S.tool === "pan") {
     S.drag = { type: "pan", x: e.clientX, y: e.clientY, sl: sc.scrollLeft, st: sc.scrollTop };
+    return;
+  }
+  const mk = e.target.closest(".mk");
+  if (mk) {
+    const m = S.tl.markers.find((x) => x.id === mk.dataset.id);
+    if (e.altKey) return removeMarker(m.id);
+    S.drag = { type: "marker", id: m.id, x: e.clientX, t0: m.t, moved: false, snap: JSON.stringify(S.tl), targets: targets(new Set([m])) };
     return;
   }
   const node = e.target.closest(".clip");
@@ -275,6 +293,13 @@ sc.addEventListener("pointermove", (e) => {
   }
   if (d.type === "scrub") return seek(timeAt(e.clientX));
   if (d.type === "box") return boxSelect(d, e);
+  if (d.type === "marker") { // snaps like a clip edge; a move under 3 px is still a click
+    if (!d.moved && Math.abs(e.clientX - d.x) < 3) return;
+    d.moved = true;
+    S.tl.markers.find((x) => x.id === d.id).t = Math.max(0, d.t0 + magnet(d, [d.t0], (e.clientX - d.x) / S.pps, d.t0, e));
+    commit();
+    return;
+  }
   if (d.type === "track") { // reorder: take the place of the track under the pointer once past its middle
     if (!e.buttons) { S.drag = null; endTrackDrag(); return; } // released outside the timeline (no capture), so no pointerup came
     const row = document.elementFromPoint(e.clientX, e.clientY)?.closest(".row[data-track]");
@@ -294,16 +319,29 @@ sc.addEventListener("pointermove", (e) => {
   const shiftLater = (x, end, by) => { for (const y of trackOf(x).clips) if (!all.includes(y) && y.start >= end - EPS) y.start += by; };
   if (d.type === "move") {
     const group = d.ids.map(findClip).map((g) => ({ c: g, o: { ...g } }));
-    if (group.length === 1) {
-      let id = document.elementFromPoint(e.clientX, e.clientY)?.closest(".row")?.dataset.track;
-      // the row under the pointer may be a track that bump() made in the last move (gone after the
-      // restore above): keep aiming at the last real track, or the clip would jump back and forth
-      if (id && !S.tl.tracks.some((t) => t.id === id)) id = d.to;
-      else if (id) d.to = id;
-      moveTrack(c, id);
-    }
+    const from = new Map(group.map((g) => [g.c, trackOf(g.c)])); // each clip's track before this move
+    let id = document.elementFromPoint(e.clientX, e.clientY)?.closest(".row")?.dataset.track;
+    // the row under the pointer may be a track that bump() made in the last move (gone after the
+    // restore above): keep aiming at the last real track, or the clip would jump back and forth
+    if (id && !S.tl.tracks.some((t) => t.id === id)) id = d.to;
+    else if (id) d.to = id;
+    // vertical move: the one group clip of that track's type goes there (a video with its sound: the
+    // video follows over video tracks, the sound over audio tracks); a bigger group stays put
+    const type = S.tl.tracks.find((t) => t.id === id)?.type, same = group.filter((g) => trackOf(g.c).type === type);
+    if (same.length === 1) moveTrack(same[0].c, id);
     const want = magnet(d, group.flatMap((g) => [g.o.start, g.o.start + g.o.duration]), dt, o.start, e);
     const lo = -Math.min(...group.map((g) => g.o.start)); // nothing goes before 0
+    // magnet: a clip that left its track leaves no gap there, the clips after it close up
+    // (not within the same track: those clips would close up into the moved clip itself)
+    if (ripple) {
+      const moving = new Set(group.map((g) => g.c));
+      for (const g of [...group].sort((a, b) => b.o.start - a.o.start)) {
+        if (from.get(g.c) === trackOf(g.c)) continue;
+        for (const x of from.get(g.c).clips) {
+          if (!moving.has(x) && x.start >= g.o.start + g.o.duration - EPS) x.start -= g.o.duration;
+        }
+      }
+    }
     for (const g of group) g.c.start = g.o.start + Math.max(lo, want);
     // on a used spot: Overwrite cuts the clips there, else the moved clips go to a new track next to it
     (over ? carve : bump)(group.map((g) => g.c));
@@ -367,6 +405,10 @@ function boxSelect(d, e) {
 
 sc.addEventListener("pointerup", (e) => {
   const d = S.drag;
+  if (d?.type === "marker") {
+    if (d.moved) S.tl.markers.sort((a, b) => a.t - b.t);
+    else seek(d.t0); // a click on a marker goes there
+  }
   if (d?.type === "box" && !d.moved) {
     if (!e.shiftKey) S.sel = null;
     seek(timeAt(e.clientX));
@@ -387,6 +429,49 @@ sc.addEventListener("pointerup", (e) => {
 });
 
 const endTrackDrag = () => $("#rows .row.dragging")?.classList.remove("dragging");
+
+/* ---------- markers: edit and delete ---------- */
+
+// the marker under the pointer (a click on the ruler is captured by the timeline, so look it up by position)
+const markerAt = (e) => document.elementFromPoint(e.clientX, e.clientY)?.closest(".mk");
+
+sc.addEventListener("contextmenu", (e) => {
+  const mk = markerAt(e);
+  if (!mk) return;
+  e.preventDefault();
+  removeMarker(mk.dataset.id);
+});
+
+// double-click: a small box under the marker with its name, color and Delete
+sc.addEventListener("dblclick", (e) => {
+  const mk = markerAt(e);
+  if (!mk) return;
+  const m = S.tl.markers.find((x) => x.id === mk.dataset.id), q = mk.getBoundingClientRect();
+  const pop = el("div", "mkpop"), name = el("input"), color = el("input"), del = el("button", "", "Delete");
+  name.placeholder = "Marker name";
+  name.value = m.name ?? "";
+  color.type = "color";
+  color.value = m.color ?? MARKER_COLOR;
+  del.tabIndex = -1;
+  pop.style.left = q.left + "px";
+  pop.style.top = q.bottom + 4 + "px";
+  pop.append(name, color, del);
+  document.body.append(pop);
+  name.focus();
+  const close = (save) => {
+    removeEventListener("pointerdown", outside, true);
+    pop.remove();
+    if (save) setMarker(m.id, { name: name.value.trim(), color: color.value });
+  };
+  const outside = (p) => { if (!pop.contains(p.target)) close(true); };
+  addEventListener("pointerdown", outside, true);
+  name.onkeydown = (k) => {
+    k.stopPropagation(); // typing must not trigger shortcuts
+    if (k.key === "Enter") close(true);
+    else if (k.key === "Escape") close(false);
+  };
+  del.onclick = () => { close(false); removeMarker(m.id); };
+});
 
 /* ---------- drop from the sidebar ---------- */
 

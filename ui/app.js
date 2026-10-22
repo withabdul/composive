@@ -3,7 +3,7 @@ import { $, S, stage, normalize, audioClips, clips, locked, selected, setSel, to
 import { pushUndo } from "./core/history.js";
 import { loadAudio } from "./timeline/audio.js";
 import { fit, ui, play, pause, seek, playReverse } from "./canvas/viewer.js";
-import { removeClips, undo, redo, copySel, paste, duplicate, setRange, clearRange, toggleLink, removeEmptyTracks } from "./core/edit.js";
+import { removeClips, undo, redo, copySel, paste, duplicate, setRange, clearRange, toggleLink, removeEmptyTracks, addMarker } from "./core/edit.js";
 import { drawSide, forgetSide } from "./sidebar/sidebar.js";
 import { zoomFit } from "./timeline/timeline.js"; // timeline, import and panel also register their own listeners
 import { forgetStrip } from "./timeline/filmstrip.js";
@@ -21,8 +21,8 @@ async function fetchProject(takeTimeline = true) {
 }
 
 async function refresh() {
+  stage.setTimeline(S.tl); // first: a seek while the audio still decodes needs the stage ready
   await Promise.all(audioClips().map((c) => loadAudio(c.src)));
-  stage.setTimeline(S.tl);
   fit();
   redraw();
   await stage.ready();
@@ -36,8 +36,15 @@ async function refresh() {
 $("#play").onclick = () => (S.playing ? pause() : play());
 $("#undo").onclick = undo;
 $("#redo").onclick = redo;
-const toggleMagnet = () => { S.magnet = !S.magnet; ui(); };
-const toggleOverwrite = () => { S.overwrite = !S.overwrite; ui(); };
+// Magnet and Overwrite stay as set after a reload (this browser only; storage may be blocked)
+try {
+  const m = JSON.parse(localStorage.getItem("composive.modes")) ?? {};
+  S.magnet = !!m.magnet;
+  S.overwrite = !!m.overwrite;
+} catch {}
+const saveModes = () => { try { localStorage.setItem("composive.modes", JSON.stringify({ magnet: S.magnet, overwrite: S.overwrite })); } catch {} };
+const toggleMagnet = () => { S.magnet = !S.magnet; saveModes(); ui(); };
+const toggleOverwrite = () => { S.overwrite = !S.overwrite; saveModes(); ui(); };
 $("#magnet").onclick = toggleMagnet;
 $("#overwrite").onclick = toggleOverwrite;
 $("#cleanTracks").onclick = removeEmptyTracks;
@@ -46,12 +53,14 @@ document.querySelectorAll("[data-tool]").forEach((b) => (b.onclick = () => { S.t
 addEventListener("keydown", (e) => {
   if (e.target.matches("textarea, input:not([type=range]), select")) return; // fields keep their native keys (Backspace, Ctrl+Z)
   const k = e.key.toLowerCase();
+  const marks = (S.tl.markers ?? []).map((m) => m.t);
   if (e.ctrlKey || e.metaKey) {
     const keys = {
       z: () => (e.shiftKey ? redo() : undo()), y: redo,
       c: copySel, x: () => { copySel(); removeClips(selected(), S.magnet); }, v: paste,
       d: () => duplicate(selected()), a: () => { setSel(clips().filter((c) => !locked(c)).map((c) => c.id)); redraw(); },
       l: toggleLink,
+      m: () => e.shiftKey && seek(marks.findLast((t) => t < S.t - EPS) ?? S.t), // Ctrl+Shift+M: previous marker
     };
     if (keys[k]) { e.preventDefault(); keys[k](); }
     return;
@@ -60,8 +69,8 @@ addEventListener("keydown", (e) => {
   const tools = { v: "view", h: "pan", x: "cut", s: "split" };
   const arrows = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] };
   const step = e.shiftKey ? 10 : 1;
-  const edges = [...new Set(clips().flatMap((c) => [c.start, c.start + c.duration]))].sort((a, b) => a - b);
-  if (arrows[k] && S.focus === "canvas" && nudge(arrows[k][0] * step, arrows[k][1] * step)) e.preventDefault();
+  const edges = [...new Set([...marks, ...clips().flatMap((c) => [c.start, c.start + c.duration])])].sort((a, b) => a - b);
+  if (arrows[k] && S.focus === "canvas" && nudge(arrows[k][0] * step, arrows[k][1] * step, e.repeat)) e.preventDefault();
   else if (k === "escape") { S.sel = null; redraw(); }
   else if (k === " ") { e.preventDefault(); S.playing ? pause() : play(); }
   else if (k === "j") playReverse();
@@ -70,7 +79,9 @@ addEventListener("keydown", (e) => {
   else if (k === "i") setRange("in");
   else if (k === "o") setRange("out");
   else if (k === "x" && e.altKey) { e.preventDefault(); clearRange(); }
-  else if (k === "m") toggleMagnet();
+  else if (k === "m" && e.shiftKey) seek(marks.find((t) => t > S.t + EPS) ?? S.t); // next marker
+  else if (k === "m") addMarker(S.t);
+  else if (k === "n") toggleMagnet();
   else if (k === "w") toggleOverwrite();
   else if (tools[k]) { S.tool = tools[k]; ui(); }
   else if (k === "delete" || k === "backspace") removeClips(selected(), S.magnet !== e.shiftKey); // ripple when magnet is on; Shift = the other way
