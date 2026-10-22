@@ -3,7 +3,18 @@
     {
       "id": "V2",
       "type": "video",
-      "clips": []
+      "clips": [
+        {
+          "id": "cmvk03bwyumg",
+          "src": "@lower",
+          "start": 0.133333,
+          "duration": 4,
+          "props": {
+            "x": 0.0235,
+            "y": 0.8058
+          }
+        }
+      ]
     },
     {
       "id": "V1",

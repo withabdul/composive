@@ -1,7 +1,7 @@
-// Left sidebar: Scenes tab (presets, the clips of the scene shown), Media tab (import, search, media grid),
+// Left sidebar: Scenes tab (the clips of the scene shown, then the templates), Media tab (import, search, media grid),
 // and the scene list in the top bar (the switch itself is in app.js).
 import { $, S, el, clips, kind, fmt, metaDur, redraw, toast, DRAG_SRC } from "../core/state.js";
-import { addClip, addBuiltin, mediaUses, removeMedia } from "../core/edit.js";
+import { addClip, addTemplate, mediaUses, removeMedia } from "../core/edit.js";
 import { ask } from "../timeline/timeline.js";
 import { seek } from "../canvas/viewer.js";
 
@@ -15,6 +15,7 @@ export function showTab(name) {
 let cards = new Map(), tiles = new Map();
 export function forgetSide(name) {
   tiles.delete(name);
+  tpls.delete(name.match(/^templates\/([^/]+)\//)?.[1]); // a file in that template's folder
   for (const path of cards.keys()) if (name.startsWith(path.slice(0, path.lastIndexOf("/") + 1))) cards.delete(path); // a file in that scene's folder
 }
 
@@ -40,6 +41,7 @@ export function drawSide() {
   }));
   tiles = new Map(S.project.media.map((m) => [m, tiles.get(m) ?? tile(m)]));
   fill($("#scenes"), [...cards.values()]);
+  drawTemplates(size);
   fill($("#media"), [...tiles.values()]);
   $('[data-tab="media"]').textContent = `Media (${S.project.media.length})`;
   filter();
@@ -153,7 +155,45 @@ function selectClip(path) {
 document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 $("#msearch").oninput = filter;
 $("#mtype").onchange = (e) => { filter(); e.target.blur(); }; // a focused select would swallow shortcuts
-for (const b of document.querySelectorAll("[data-preset]")) {
-  b.onclick = () => addBuiltin(b.dataset.preset);
-  draggable(b, "@" + b.dataset.preset);
+// one card per templates/<slug>/: a preview at its middle with the default props.
+// Kept between redraws like the clip cards; forgetSide() drops one whose files changed.
+let tpls = new Map();
+function drawTemplates(size) {
+  tpls = new Map((S.project.templates ?? []).map((t) => {
+    const key = `${t.slug}|${t.label}|${t.bottom}|${size}`, old = tpls.get(t.slug);
+    return [t.slug, old?.dataset.key === key ? old : tplCard(t, key)];
+  }));
+  fill($("#templates"), [...tpls.values()]);
 }
+
+function tplCard(t, key) {
+  const c = el("div", "tile"), th = el("div", "mthumb"), f = el("iframe");
+  c.dataset.key = key;
+  c.title = `${t.label}\ntemplates/${t.slug}/ (src "@${t.slug}")\nClick: add at the playhead. Drag: drop on the timeline.`;
+  c.onclick = () => addTemplate(t);
+  draggable(c, "@" + t.slug);
+  th.style.aspectRatio = `${S.tl.width} / ${S.tl.height}`;
+  f.src = `/t/${t.slug}/index.html`;
+  f.style.width = S.tl.width + "px"; f.style.height = S.tl.height + "px";
+  new ResizeObserver(() => (f.style.transform = `scale(${th.clientWidth / S.tl.width})`)).observe(th);
+  let dur = 0, p = {}, raf = 0;
+  const show = (time) => f.contentWindow?.seek?.(time, dur, p);
+  f.onload = () => {
+    const d = f.contentDocument;
+    dur = metaDur(d);
+    try { p = JSON.parse(d.querySelector('meta[name="props"]')?.content ?? "{}"); } catch { p = {}; }
+    show(dur / 2);
+  };
+  // hover: play it in a loop from the start; leave: back to the middle frame
+  c.onmouseenter = () => {
+    if (!dur) return;
+    const t0 = performance.now();
+    const tick = (now) => { show(((now - t0) / 1000) % dur); raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+  };
+  c.onmouseleave = () => { cancelAnimationFrame(raf); if (dur) show(dur / 2); };
+  th.append(f);
+  c.append(th, el("span", "mname", t.label));
+  return c;
+}
+

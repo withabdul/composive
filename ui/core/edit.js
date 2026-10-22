@@ -387,7 +387,7 @@ export function moveTrack(c, id) {
 async function probe(src) {
   const k = kind(src);
   if (k === "scene") {
-    const url = src[0] === "@" ? `/ui/builtin/${src.slice(1)}.html` : "/p/" + src; // "@text" = a built-in scene
+    const url = src[0] === "@" ? `/t/${src.slice(1)}/index.html` : "/p/" + src; // "@text" = templates/text/index.html
     return metaDur(new DOMParser().parseFromString(await (await fetch(url)).text(), "text/html"));
   }
   if (k === "audio") { await loadAudio(src); return S.bufs.get(src)?.duration ?? 3; }
@@ -446,11 +446,11 @@ export async function addClip(src, at) {
   commit();
 }
 
-// A built-in scene (ui/builtin/<name>.html, src "@name") at the playhead, like a drop there: overlays
-// (text, shape, lower third) on the top video track, a solid on the bottom one (a background).
-export function addBuiltin(name) {
+// A template (templates/<slug>/index.html, src "@slug") at the playhead, like a drop there: on the top
+// video track, or the bottom one when the template says so (a background, e.g. solid).
+export function addTemplate({ slug, bottom }) {
   const videos = S.tl.tracks.filter((t) => t.type === "video");
-  return addClip("@" + name, { t: snap(S.t), track: (name === "solid" ? videos.at(-1) : videos[0])?.id });
+  return addClip("@" + slug, { t: snap(S.t), track: (bottom ? videos.at(-1) : videos[0])?.id });
 }
 
 // Where media `src` is used: [{ name, n }] per scene file ("global" = the global tracks), from the saved state.

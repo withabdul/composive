@@ -2,7 +2,7 @@
 export const MEDIA = /\.(mp4|webm|mov|mp3|wav|m4a|ogg|png|jpe?g|webp)$/i;
 
 export const kind = (src) =>
-  src[0] === "@" || /\.html?$/i.test(src) ? "scene" // "@text" = built-in scene in ui/builtin/
+  src[0] === "@" || /\.html?$/i.test(src) ? "scene" // "@text" = templates/text/index.html
   : /\.(mp4|webm|mov)$/i.test(src) ? "video"
   : /\.(mp3|wav|m4a|ogg)$/i.test(src) ? "audio"
   : "image";
@@ -97,7 +97,7 @@ export function createStage(root, base = "/p/") {
   }
 
   function make(c) {
-    const k = kind(c.src), url = c.src[0] === "@" ? `/ui/builtin/${c.src.slice(1)}.html` : base + c.src;
+    const k = kind(c.src), url = c.src[0] === "@" ? `/t/${c.src.slice(1)}/index.html` : base + c.src;
     const n = { k, src: c.src, defaults: k === "scene" ? {} : { ...MEDIA_PROPS } };
     let el, ready;
     if (k === "scene") {

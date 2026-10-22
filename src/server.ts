@@ -5,6 +5,7 @@ import { SCENE } from "../ui/core/project.js";
 import { mediaDest } from "./import.ts";
 
 const UI = resolve(import.meta.dir, "..", "ui");
+const TEMPLATES = resolve(import.meta.dir, "..", "templates");
 const EMPTY = {
   fps: 30, width: 1920, height: 1080,
   tracks: [{ id: "V1", type: "video", clips: [] }, { id: "A1", type: "audio", clips: [] }],
@@ -42,6 +43,24 @@ async function sendFile(req: Request, path: string | null) {
 
 const readJson = async (path: string, empty: any) => (existsSync(path) ? JSON.parse(await Bun.file(path).text()) : empty);
 
+// templates/<slug>/index.html, used by a clip as src "@<slug>". Label = its <title>; <meta name="track"
+// content="bottom"> = add it on the bottom video track (a background).
+async function templates() {
+  if (!existsSync(TEMPLATES)) return [];
+  const out = [];
+  for (const e of readdirSync(TEMPLATES, { withFileTypes: true })) {
+    const f = join(TEMPLATES, e.name, "index.html");
+    if (!e.isDirectory() || e.name.startsWith(".") || !existsSync(f)) continue;
+    const html = await Bun.file(f).text();
+    out.push({
+      slug: e.name,
+      label: html.match(/<title>([^<]*)<\/title>/i)?.[1].trim() || e.name,
+      bottom: /<meta\s+name="track"\s+content="bottom"/i.test(html),
+    });
+  }
+  return out;
+}
+
 // scenes/###-slug folders in order; other folders in scenes/ are ignored (warned once)
 const warned = new Set<string>();
 function sceneDirs(root: string) {
@@ -78,6 +97,11 @@ export function serve(dir: string, port = 9999) {
       if (lastWritten.has(n) && existsSync(p) && (await Bun.file(p).text()) === lastWritten.get(n)) return;
       send(`data: ${n}\n\n`);
     }, 80));
+  });
+
+  // a template edit reloads the editor too (sent as templates/<path>, outside the project)
+  if (existsSync(TEMPLATES)) watch(TEMPLATES, { recursive: true }, (_, name) => {
+    if (name) send(`data: templates/${name.replaceAll("\\", "/")}\n\n`);
   });
 
   return Bun.serve({
@@ -135,6 +159,7 @@ export function serve(dir: string, port = 9999) {
       if (pathname === "/") return sendFile(req, join(UI, "index.html"));
       if (pathname === "/render") return sendFile(req, join(UI, "render.html"));
       if (pathname.startsWith("/ui/")) return sendFile(req, safe(UI, pathname.slice(3)));
+      if (pathname.startsWith("/t/")) return sendFile(req, safe(TEMPLATES, pathname.slice(2)));
       if (pathname.startsWith("/p/")) return sendFile(req, safe(root, pathname.slice(2)));
 
       if (pathname === "/api/events") {
@@ -185,6 +210,7 @@ export function serve(dir: string, port = 9999) {
                 .filter(Boolean).map((m) => ({ name: m![1], path: m![0] })),
             }))),
             media: files.filter((p) => MEDIA.test(p)),
+            templates: await templates(),
           });
         } catch (e) {
           // AI may be mid-edit; the UI keeps its last good state.

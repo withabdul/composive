@@ -38,7 +38,6 @@ canvas/           stage.js frame renderer shared with export, viewer.js transpor
 timeline/         timeline.js drawing and pointer tools, audio.js playback and meter
 sidebar/          sidebar.js Scenes/Media tabs, import.js upload and drop
 panel/            panel.js right panel (clip form)
-builtin/          built-in scenes (@text)
 index.html, render.html (export page), style.css
 ```
 
@@ -95,11 +94,13 @@ per clip in `clip.props`. They arrive as the third argument of `seek`, already m
 If the defaults contain numeric `x` and `y` (fractions of the frame, 0..1), the scene content can be dragged
 in the viewer; the drag writes `props.x` and `props.y`.
 
-### Built-in scenes
+### Templates
 
-`"src": "@<name>"` is a scene that ships with the editor (`ui/builtin/<name>.html`), no HTML needed.
-The sidebar presets add one at the playhead (click) or where you drop it (drag): overlays on the top video
-track, the solid on the bottom one.
+`"src": "@<slug>"` is a scene from `templates/<slug>/index.html` (in the repo root, shared by all projects).
+The clip points to the template, so a template edit changes every clip that uses it; text and colors go in props.
+Each template folder is a preview card under "Templates" in the sidebar Scenes tab (label = the page `<title>`): click adds it at the
+playhead, drag drops it on the timeline. It goes on the top video track, or on the bottom one with
+`<meta name="track" content="bottom">` (a background). Add a folder to add a template; the editor reloads.
 
 - `@text`: `text`, `size`, `color`, `weight`, `font`, `x`, `y`
 - `@shape`: `color`, `w`, `h` (fractions of the frame), `round` (0 = rectangle, 1 = ellipse), `opacity`, `x`, `y`
