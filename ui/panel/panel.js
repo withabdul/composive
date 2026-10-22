@@ -2,9 +2,10 @@
 // The form is rebuilt only when what it is built from changes (keyOf); otherwise the inputs are
 // just synced, so typing never loses focus. With several clips selected, the fields show the main
 // clip and an edit applies to all of them (start moves them all by the same amount).
-import { $, S, el, MIN, bus, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
+import { $, S, el, MIN, EPS, bus, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place } from "../core/edit.js";
+import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place, setProp, toggleKey, setEase, localAt } from "../core/edit.js";
+import { propsAt, EASES } from "../canvas/stage.js";
 import { ui } from "../canvas/viewer.js";
 
 const FALLBACK = { offset: 0, fadeIn: 0, fadeOut: 0, volume: 1 };
@@ -24,11 +25,9 @@ const keyOf = (c) => {
     cs.map(clipKind).join(), commonProps(cs, c).join()].join("|");
 };
 
+// a field's value at the playhead (keyframes applied)
 function read(c, path) {
-  if (path.startsWith("props.")) {
-    const k = path.slice(6);
-    return c.props?.[k] ?? stage.defaults(c.id)[k];
-  }
+  if (path.startsWith("props.")) return propsAt(c, stage.defaults(c.id), localAt(c))[path.slice(6)];
   return c[path] ?? FALLBACK[path];
 }
 
@@ -39,16 +38,68 @@ function group(title) {
   return g;
 }
 
-function field(g, label, path, type, attrs = {}) {
+// Number props with a slider: [min, max, tick mark spacing] as shown in the panel. The slider moves in
+// steps of 0.5; the number box keeps a finer step and can go past min and max.
+const RANGE = {
+  x: [0, 1, 0.5], y: [0, 1, 0.5], opacity: [0, 1, 0.5], round: [0, 1, 0.5], rotation: [-180, 180, 90],
+  scale: [0, 500, 100], sx: [0, 500, 100], sy: [0, 500, 100], w: [0, 5, 1], h: [0, 5, 1], size: [0, 300, 50],
+};
+// props the panel shows in percent (stored as a factor: 1 = 100%)
+const PCT = new Set(["scale", "sx", "sy"]);
+
+function field(g, label, path, type, attrs = {}, keyable = false) {
   const row = el("label", "pf");
   const input = el(type === "area" ? "textarea" : "input");
   if (type !== "area") input.type = type;
   Object.assign(input, attrs);
   input.dataset.path = path;
-  const name = el("span", "", label);
+  const key = path.slice(6), pct = path.startsWith("props.") && PCT.has(key);
+  if (pct) input.dataset.mul = 100;
+  const name = el("span", "", pct ? label + " %" : label);
   if (type === "number") scrub(name, input);
-  row.append(name, input);
+  row.append(name);
+  const r = type === "number" && path.startsWith("props.") && RANGE[key];
+  if (r) {
+    const sl = el("input");
+    Object.assign(sl, { type: "range", min: r[0], max: r[1], step: 0.5 });
+    sl.dataset.path = path;
+    const ticks = el("datalist"); // the browser draws these as tick marks under the slider
+    ticks.id = "ticks-" + key; // one row per prop, so the id is unique
+    for (let v = r[0]; v <= r[1]; v += r[2]) ticks.append(new Option("", v));
+    sl.setAttribute("list", ticks.id);
+    row.append(ticks);
+    if (pct) sl.dataset.mul = 100;
+    sl.addEventListener("change", () => sl.blur()); // a focused slider would swallow shortcuts
+    row.classList.add("sl");
+    row.append(sl);
+  }
+  row.append(input);
+  if (keyable) row.append(...keyButtons(path.slice(6), input));
   g.append(row);
+}
+
+// ◆ adds or removes a keyframe of this prop at the playhead; the easing menu shows when the playhead
+// is on one of its keys. sync() sets their state.
+function keyButtons(key, input) {
+  const b = el("button", "kfb", "◆"), ease = el("select", "kfe");
+  b.dataset.key = ease.dataset.key = key;
+  b.tabIndex = -1;
+  b.onpointerdown = (e) => e.preventDefault(); // no focus: a focused panel would record a second undo step
+  b.onclick = (e) => {
+    e.preventDefault(); // inside a <label>: do not pass the click to the input
+    const c = findClip(S.sel);
+    toggleKey(c, key, read(c, input.dataset.path));
+    focusSnap = JSON.stringify(S.tl);
+  };
+  for (const v of EASES) ease.append(new Option(v === "inout" ? "ease in-out" : v === "in" ? "ease in" : v === "out" ? "ease out" : v, v));
+  ease.title = "Easing from this keyframe to the next";
+  ease.onchange = (e) => {
+    e.stopPropagation();
+    setEase(findClip(S.sel), key, ease.value);
+    focusSnap = JSON.stringify(S.tl);
+    ease.blur(); // a focused select would swallow shortcuts
+  };
+  return [b, ease];
 }
 
 // Drag a number field's label left/right to change it: 1 step per 2 px, Shift x10, Alt x0.1.
@@ -123,9 +174,9 @@ function build(c) {
     const g = group("Props");
     for (const key of keys) {
       const d = defaults[key], path = "props." + key;
-      if (typeof d === "number") field(g, key, path, "number", { step: key === "rotation" || Math.abs(d) > 1 ? "1" : "0.01" });
+      if (typeof d === "number") field(g, key, path, "number", { step: key === "rotation" || PCT.has(key) || Math.abs(d) > 1 ? "1" : "0.01" }, !many);
       else if (typeof d === "boolean") field(g, key, path, "checkbox");
-      else if (typeof d === "string" && /^#[0-9a-f]{6}$/i.test(d)) field(g, key, path, "color");
+      else if (typeof d === "string" && /^#[0-9a-f]{6}$/i.test(d)) field(g, key, path, "color", {}, !many);
       else field(g, key, path, key === "text" || String(d).includes("\n") ? "area" : "text");
     }
   }
@@ -194,7 +245,20 @@ function sync(c) {
     const mixed = cs.length > 1 && path !== "start" && cs.some((x) => read(x, path) !== v);
     input.placeholder = mixed ? "mixed" : "";
     if (input.type === "checkbox") { input.checked = !!v; input.indeterminate = mixed; }
-    else input.value = mixed ? "" : v ?? "";
+    else input.value = mixed ? "" : input.dataset.mul && typeof v === "number" ? +(v * input.dataset.mul).toFixed(4) : v ?? "";
+  }
+  // keyframe buttons: "has" = the prop is animated, "on" = a key at the playhead
+  const lt = localAt(c), inClip = S.t >= c.start - EPS && S.t <= c.start + c.duration + EPS;
+  for (const b of body.querySelectorAll(".kfb")) {
+    const ks = c.keys?.[b.dataset.key], k = ks?.find((x) => Math.abs(x.t - lt) < EPS);
+    b.classList.toggle("has", !!ks?.length);
+    b.classList.toggle("on", !!k);
+    b.disabled = !inClip;
+    b.title = !inClip ? "Move the playhead into this clip to add a keyframe"
+      : k ? "Remove the keyframe at the playhead" : "Add a keyframe at the playhead";
+    const ease = b.nextSibling;
+    ease.hidden = !k;
+    if (k && ease !== document.activeElement) ease.value = k.ease ?? "linear";
   }
   const json = $("#pJson");
   if (json && json !== document.activeElement) json.value = JSON.stringify(c, null, 2);
@@ -223,9 +287,10 @@ function apply(input) {
   const path = input.dataset.path, main = findClip(S.sel), cs = selected();
   let v = input.type === "checkbox" ? input.checked : input.type === "number" ? input.valueAsNumber : input.value;
   if (Number.isNaN(v) || !main) return;
+  if (input.dataset.mul) v /= input.dataset.mul; // percent field -> stored factor
   if (path.startsWith("props.")) {
     const key = path.slice(6);
-    for (const c of cs) if (key in stage.defaults(c.id)) c.props = { ...c.props, [key]: v };
+    for (const c of cs) if (key in stage.defaults(c.id)) setProp(c, key, v); // auto-key when animated
   } else if (path === "start") {
     const d = Math.max(0, v) - main.start;
     for (const c of cs) c.start = Math.max(0, c.start + d);
@@ -258,3 +323,8 @@ body.addEventListener("focusout", flush);
 
 $("#pClose").onclick = () => { closedFor = S.sel; render(); };
 bus.addEventListener("redraw", render);
+// the playhead moved (seek, playback): animated values and keyframe buttons change
+bus.addEventListener("time", () => {
+  const c = shownKey && S.sel && findClip(S.sel);
+  if (c) sync(c);
+});

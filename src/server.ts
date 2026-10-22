@@ -1,6 +1,7 @@
-import { watch, readdirSync, existsSync, rmSync } from "node:fs";
+import { watch, readdirSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { join, resolve, basename, sep } from "node:path";
 import { MEDIA } from "../ui/canvas/stage.js";
+import { SCENE } from "../ui/core/project.js";
 import { mediaDest } from "./import.ts";
 
 const UI = resolve(import.meta.dir, "..", "ui");
@@ -39,10 +40,24 @@ async function sendFile(req: Request, path: string | null) {
   });
 }
 
+const readJson = async (path: string, empty: any) => (existsSync(path) ? JSON.parse(await Bun.file(path).text()) : empty);
+
+// scenes/###-slug folders in order; other folders in scenes/ are ignored (warned once)
+const warned = new Set<string>();
+function sceneDirs(root: string) {
+  const dir = join(root, "scenes");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).filter((n) => {
+    if (SCENE.test(n)) return true;
+    if (!warned.has(n)) { warned.add(n); console.warn(`scenes/${n} is skipped: a scene folder name must be ###-slug, e.g. 001-hook`); }
+    return false;
+  }).sort();
+}
+
 export function serve(dir: string, port = 9999) {
   const root = resolve(dir);
   const tlPath = join(root, "timeline.json");
-  let lastWritten = ""; // own writes must not echo back through the watcher
+  const lastWritten = new Map<string, string>(); // file -> what we wrote: own writes must not echo back through the watcher
   const enc = new TextEncoder();
   const clients = new Set<ReadableStreamDefaultController>();
   const send = (s: string) => {
@@ -59,7 +74,8 @@ export function serve(dir: string, port = 9999) {
     if (/^(\.git|node_modules)(\/|$)/.test(n)) return;
     clearTimeout(timers.get(n));
     timers.set(n, setTimeout(async () => {
-      if (n === "timeline.json" && existsSync(tlPath) && (await Bun.file(tlPath).text()) === lastWritten) return;
+      const p = join(root, n);
+      if (lastWritten.has(n) && existsSync(p) && (await Bun.file(p).text()) === lastWritten.get(n)) return;
       send(`data: ${n}\n\n`);
     }, 80));
   });
@@ -116,25 +132,45 @@ export function serve(dir: string, port = 9999) {
         }), { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
       }
 
+      // new scene: POST /api/scene?name=Hook -> scenes/<next number>-hook/timeline.json
+      if (pathname === "/api/scene" && req.method === "POST") {
+        const name = (searchParams.get("name") ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        if (!name) return new Response("bad name", { status: 400 });
+        const last = sceneDirs(root).at(-1);
+        const slug = String((last ? Number(last.slice(0, 3)) : 0) + 1).padStart(3, "0") + "-" + name;
+        mkdirSync(join(root, "scenes", slug), { recursive: true });
+        await Bun.write(join(root, "scenes", slug, "timeline.json"), JSON.stringify({ tracks: [] }, null, 2));
+        return Response.json({ slug });
+      }
+
       if (pathname === "/api/timeline" || pathname === "/api/project") {
         if (req.method === "PUT") {
+          // ?scene=001-hook saves that scene's timeline, else the global one
+          const scene = searchParams.get("scene");
+          if (scene && (!SCENE.test(scene) || !existsSync(join(root, "scenes", scene)))) return new Response("no such scene", { status: 404 });
+          const rel = scene ? `scenes/${scene}/timeline.json` : "timeline.json";
+          let text;
           try {
-            lastWritten = JSON.stringify(JSON.parse(await req.text()), null, 2);
+            text = JSON.stringify(JSON.parse(await req.text()), null, 2);
           } catch { return new Response("invalid json", { status: 400 }); }
-          await Bun.write(tlPath, lastWritten);
+          lastWritten.set(rel, text);
+          await Bun.write(join(root, rel), text);
           return new Response("ok");
         }
         try {
-          const timeline = existsSync(tlPath) ? JSON.parse(await Bun.file(tlPath).text()) : EMPTY;
+          const timeline = await readJson(tlPath, EMPTY);
           if (pathname === "/api/timeline") return Response.json(timeline);
           const files = walk(root, root);
           return Response.json({
             name: basename(root),
             timeline,
-            scenes: files
-              .map((p) => p.match(/^scenes\/([^/]+)\/index\.html$/))
-              .filter(Boolean)
-              .map((m) => ({ name: m![1], path: m![0] })),
+            scenes: await Promise.all(sceneDirs(root).map(async (slug) => ({
+              slug,
+              timeline: await readJson(join(root, "scenes", slug, "timeline.json"), { tracks: [] }),
+              // the HTML clips of this scene: scenes/<slug>/<clip>/index.html
+              clips: files.map((p) => p.match(new RegExp(`^scenes/${slug}/([^/]+)/index\\.html$`)))
+                .filter(Boolean).map((m) => ({ name: m![1], path: m![0] })),
+            }))),
             media: files.filter((p) => MEDIA.test(p)),
           });
         } catch (e) {

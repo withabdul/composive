@@ -1,6 +1,6 @@
-// Left sidebar: Scenes tab (presets, scene thumbnails), Media tab (import, search, media grid),
-// and the scene picker in the top bar.
-import { $, S, el, clips, kind, fmt, metaDur, redraw, DRAG_SRC } from "../core/state.js";
+// Left sidebar: Scenes tab (presets, the clips of the scene shown), Media tab (import, search, media grid),
+// and the scene list in the top bar (the switch itself is in app.js).
+import { $, S, el, clips, kind, fmt, metaDur, redraw, toast, DRAG_SRC } from "../core/state.js";
 import { addClip, addBuiltin } from "../core/edit.js";
 import { seek } from "../canvas/viewer.js";
 
@@ -25,9 +25,15 @@ function fill(box, nodes) {
 export function drawSide() {
   const pick = $("#scenePick");
   pick.innerHTML = "";
-  for (const s of S.project.scenes) pick.append(new Option(s.name, s.path));
+  pick.append(new Option("All scenes", ""));
+  for (const s of S.project.scenes) pick.append(new Option(s.slug, s.slug));
+  pick.value = S.scene;
+  $("#scenePath").textContent = S.scene ? `scenes/${S.scene}/` : "-";
+  // cards: the HTML clips of the scene shown (scenes/<slug>/<clip>/index.html)
+  const shown = S.project.scenes.find((s) => s.slug === S.scene)?.clips ?? [];
+  $("#scenes").dataset.empty = S.scene ? `No clips yet. Add scenes/${S.scene}/<clip>/index.html` : "Pick a scene to see its clips.";
   const size = `${S.tl.width}x${S.tl.height}`; // card thumbnails are scaled to the frame size
-  cards = new Map(S.project.scenes.map((s) => {
+  cards = new Map(shown.map((s) => {
     const old = cards.get(s.path);
     return [s.path, old?.dataset.size === size ? old : card(s, size)];
   }));
@@ -43,7 +49,7 @@ function card(s, size) {
   const card = el("div", "card");
   card.dataset.size = size;
   card.title = s.path + "\nDrag onto the timeline to add";
-  card.onclick = () => openScene(s.path);
+  card.onclick = () => selectClip(s.path);
   draggable(card, s.path);
   const th = el("div", "thumb");
   th.style.height = S.tl.height * k + "px";
@@ -121,9 +127,10 @@ function filter() {
   empty.textContent = S.project.media.length ? "No match." : "No media yet. Drop files here or use Files / Folder.";
 }
 
-function openScene(path) {
+// a click on a clip card: select that clip on the timeline and go to it
+function selectClip(path) {
   const c = clips().find((x) => x.src === path);
-  if (!c) { $("#scenePath").textContent = path + " (not in timeline, use +)"; return; }
+  if (!c) return toast("Not in the timeline yet. Use + or drag it there.");
   S.sel = c.id;
   seek(c.start);
   redraw();
@@ -132,7 +139,6 @@ function openScene(path) {
 document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 $("#msearch").oninput = filter;
 $("#mtype").onchange = (e) => { filter(); e.target.blur(); }; // a focused select would swallow shortcuts
-$("#scenePick").onchange = (e) => openScene(e.target.value);
 for (const b of document.querySelectorAll("[data-preset]")) {
   b.onclick = () => addBuiltin(b.dataset.preset);
   draggable(b, "@" + b.dataset.preset);

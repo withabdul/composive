@@ -1,11 +1,16 @@
 // Timeline: drawing (ruler, range, rows, clips, waveform, filmstrip, fades) and pointer interaction for the four tools.
 import { $, S, bus, redraw, el, clamp, kind, clipKind, DRAG_SRC, clips, findClip, trackOf, locked, withLinked, isSel, selIds, selected, setSel, snap, totalDur, stage, LABEL, ROW, MIN, EPS } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, renameTrack, setMarker, removeMarker, MARKER_COLOR } from "../core/edit.js";
+import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, toggleGlobal, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt } from "../core/edit.js";
+import { isGlobal } from "../core/project.js";
 import { seek, ui } from "../canvas/viewer.js";
 import { strip, FRAME_H } from "./filmstrip.js";
 
 const sc = $("#tlscroll"), inner = $("#tlinner"), snapLine = $("#snapline"), marquee = $("#marquee");
+const shade = [el("div", "outside"), el("div", "outside")]; // dims the time before and after the scene shown
+inner.append(...shade);
+// earliest start of a clip: a scene clip stays inside its scene
+const floor = (c) => (S.scene && !isGlobal(trackOf(c)) ? S.win.a : 0);
 
 bus.addEventListener("redraw", () => drawTimeline());
 let scrollFrame = 0; // only the visible part is drawn, so scrolling draws again (once per frame)
@@ -66,14 +71,22 @@ function drawTimeline() {
     ruler.append(band);
   }
 
+  shade[0].hidden = shade[1].hidden = !S.scene;
+  shade[0].style.left = LABEL + "px";
+  shade[0].style.width = S.win.a * S.pps + "px";
+  shade[1].style.left = LABEL + S.win.b * S.pps + "px";
+  shade[1].style.width = Math.max(0, dur - S.win.b) * S.pps + "px";
+
   const rows = $("#rows");
   rows.innerHTML = "";
   const solo = S.tl.tracks.some((t) => t.type === "audio" && t.solo);
+  const firstGlobal = S.tl.tracks.find(isGlobal);
   for (const tr of S.tl.tracks) {
     // "off" = not seen or heard: a hidden video track, a muted audio track, or one left out by solo
     const off = tr.type === "audio" ? (solo ? !tr.solo : tr.mute) : tr.hide;
     const dragging = S.drag?.type === "track" && S.drag.id === tr.id; // kept while reorder redraws the rows
-    const row = el("div", `row ${tr.type}` + (off ? " off" : "") + (tr.lock ? " locked" : "") + (dragging ? " dragging" : ""));
+    const row = el("div", `row ${tr.type}` + (off ? " off" : "") + (tr.lock ? " locked" : "") + (dragging ? " dragging" : "")
+      + (tr === firstGlobal && tr !== S.tl.tracks[0] ? " gstart" : ""));
     row.dataset.track = tr.id;
     row.style.height = ROW[tr.type] + "px";
     row.append(header(tr));
@@ -95,14 +108,20 @@ const ICON = {
 // Track header: name (double-click to rename), flag buttons, delete; drag it up or down to reorder.
 function header(tr) {
   const h = el("div", "label");
+  if (tr.ro) { // all scenes: a scene's track, shown only (edit it in its scene)
+    h.title = "Scene track. Pick the scene in the top bar to edit it.";
+    h.append(el("span", "tname", tr.name ? `${tr.id.split("/")[0]}/${tr.name}` : tr.id));
+    return h;
+  }
   h.dataset.track = tr.id;
   h.title = "Drag to reorder. Double-click the name to rename.";
   const btns = el("div", "tbtns");
   const keys = tr.type === "audio"
     ? [["mute", "M", "Mute"], ["solo", "S", "Solo: hear only solo tracks"], ["lock", ICON.lock, "Lock: no edits"]]
     : [["hide", ICON.hide, "Hide: not in preview or export"], ["lock", ICON.lock, "Lock: no edits"]];
+  if (S.scene) keys.push(["global", "G", "Global: on for the whole video (e.g. music). Off: only in this scene"]);
   for (const [key, html, tip] of [...keys, ["del", "×", "Delete track and its clips"]]) {
-    const b = el("button", (tr[key] ? "on " : "") + key);
+    const b = el("button", ((key === "global" ? isGlobal(tr) : tr[key]) ? "on " : "") + key);
     b.innerHTML = html;
     b.title = tip;
     b.dataset.act = key;
@@ -129,9 +148,19 @@ function clipEl(c, view, tr) {
     if (k === "video") d.append(cached(c, `${key}|${!!strip(c.src)}`, () => filmCanvas(c, from, to)));
   }
   const parts = c.src.split("/");
-  const label = c.src[0] === "@" ? c.props?.text || "text" : k === "scene" ? parts.at(-2) : parts.at(-1);
+  const label = c.src[0] === "@" ? c.props?.text || c.src.slice(1) : k === "scene" ? parts.at(-2) : parts.at(-1);
   d.append(el("span", "name", label));
   d.append(el("i", "edge l"), el("i", "edge r"));
+  // keyframes: one ◆ per key time (all props), at the bottom of the clip
+  for (const kt of new Set(Object.values(c.keys ?? {}).flat().map((k) => k.t))) {
+    const x = (kt - (c.offset || 0)) * S.pps;
+    if (x < -1 || x > c.duration * S.pps + 1) continue; // trimmed away
+    const kf = el("i", "kf");
+    kf.dataset.kt = kt;
+    kf.style.left = x + "px";
+    kf.title = "Keyframe. Click: go here. Drag: move. Alt+click or right-click: delete.";
+    d.append(kf);
+  }
   if (k === "audio") {
     const fi = el("i", "fh in"), fo = el("i", "fh out");
     fi.style.left = (c.fadeIn || 0) * S.pps + "px";
@@ -255,6 +284,15 @@ sc.addEventListener("pointerdown", (e) => {
   }
   const c = findClip(node.dataset.id);
   if (locked(c)) return;
+  const kf = e.target.closest(".kf");
+  if (kf) { // a keyframe ◆: select its clip; drag moves the keys at that time, Alt+click deletes them
+    const kt = Number(kf.dataset.kt);
+    if (!isSel(c.id)) setSel([c.id]);
+    if (e.altKey) return removeKeysAt(c, kt);
+    S.drag = { type: "kf", id: c.id, kt, x: e.clientX, moved: false, snap: JSON.stringify(S.tl) };
+    redraw();
+    return;
+  }
   const one = e.altKey; // Alt: this clip only, without the clip linked to it
   const grp = (one ? [c] : withLinked([c])).map((x) => x.id); // c and its linked clips
   const others = grp.filter((i) => i !== c.id);
@@ -293,6 +331,22 @@ sc.addEventListener("pointermove", (e) => {
   }
   if (d.type === "scrub") return seek(timeAt(e.clientX));
   if (d.type === "box") return boxSelect(d, e);
+  if (d.type === "kf") { // keys at d.kt move together, on whole frames, inside the clip
+    if (!d.moved && Math.abs(e.clientX - d.x) < 3) return;
+    d.moved = true;
+    S.tl = JSON.parse(d.snap);
+    const c = findClip(d.id), lo = c.offset || 0;
+    const t = clamp(snap(c.start + d.kt - lo + (e.clientX - d.x) / S.pps) - c.start + lo, lo, lo + c.duration);
+    for (const [key, ks] of Object.entries(c.keys)) {
+      const k = ks.find((x) => Math.abs(x.t - d.kt) < EPS);
+      if (!k) continue;
+      c.keys[key] = ks.filter((x) => x === k || Math.abs(x.t - t) >= EPS); // a key already there gives way
+      k.t = t;
+      c.keys[key].sort((a, b) => a.t - b.t);
+    }
+    commit();
+    return;
+  }
   if (d.type === "marker") { // snaps like a clip edge; a move under 3 px is still a click
     if (!d.moved && Math.abs(e.clientX - d.x) < 3) return;
     d.moved = true;
@@ -325,12 +379,19 @@ sc.addEventListener("pointermove", (e) => {
     // restore above): keep aiming at the last real track, or the clip would jump back and forth
     if (id && !S.tl.tracks.some((t) => t.id === id)) id = d.to;
     else if (id) d.to = id;
-    // vertical move: the one group clip of that track's type goes there (a video with its sound: the
-    // video follows over video tracks, the sound over audio tracks); a bigger group stays put
+    // vertical move: the group clips of the hovered track's type move by the same number of tracks as
+    // the lead clip (the held clip, or the group clip of that type: a video's sound over audio tracks).
+    // The other type stays. Stops at the first/last track; no move when a target track is locked.
     const type = S.tl.tracks.find((t) => t.id === id)?.type, same = group.filter((g) => trackOf(g.c).type === type);
-    if (same.length === 1) moveTrack(same[0].c, id);
+    const lead = same.find((g) => g.c === c) ?? same[0];
+    if (lead) {
+      const ts = S.tl.tracks.filter((t) => t.type === type), at = (g) => ts.indexOf(trackOf(g.c));
+      const idx = same.map(at);
+      const k = clamp(ts.findIndex((t) => t.id === id) - at(lead), -Math.min(...idx), ts.length - 1 - Math.max(...idx));
+      if (k && !idx.some((i) => ts[i + k].lock)) same.forEach((g, n) => moveTrack(g.c, ts[idx[n] + k].id));
+    }
     const want = magnet(d, group.flatMap((g) => [g.o.start, g.o.start + g.o.duration]), dt, o.start, e);
-    const lo = -Math.min(...group.map((g) => g.o.start)); // nothing goes before 0
+    const lo = Math.max(...group.map((g) => floor(g.c) - g.o.start)); // nothing goes before 0, a scene clip not before its scene
     // magnet: a clip that left its track leaves no gap there, the clips after it close up
     // (not within the same track: those clips would close up into the moved clip itself)
     if (ripple) {
@@ -358,7 +419,7 @@ sc.addEventListener("pointermove", (e) => {
       }
     } else {
       // not before the source start, nor (unless overwrite) into the clip before
-      const lo = Math.max(...all.map((x) => Math.max(-(x.offset || 0), over ? -x.start : neighbors(x).prev - x.start)));
+      const lo = Math.max(...all.map((x) => Math.max(-(x.offset || 0), over ? floor(x) - x.start : Math.max(floor(x), neighbors(x).prev) - x.start)));
       const delta = clamp(magnet(d, [o.start], dt, o.start, e), lo, hi);
       for (const x of all) { x.start += delta; x.offset = (x.offset || 0) + delta; x.duration -= delta; }
       if (over) carve(all);
@@ -409,6 +470,7 @@ sc.addEventListener("pointerup", (e) => {
     if (d.moved) S.tl.markers.sort((a, b) => a.t - b.t);
     else seek(d.t0); // a click on a marker goes there
   }
+  if (d?.type === "kf" && !d.moved) { const c = findClip(d.id); seek(c.start + d.kt - (c.offset || 0)); } // a click on a ◆ goes there
   if (d?.type === "box" && !d.moved) {
     if (!e.shiftKey) S.sel = null;
     seek(timeAt(e.clientX));
@@ -436,10 +498,12 @@ const endTrackDrag = () => $("#rows .row.dragging")?.classList.remove("dragging"
 const markerAt = (e) => document.elementFromPoint(e.clientX, e.clientY)?.closest(".mk");
 
 sc.addEventListener("contextmenu", (e) => {
-  const mk = markerAt(e);
-  if (!mk) return;
+  const at = document.elementFromPoint(e.clientX, e.clientY);
+  const mk = at?.closest(".mk"), kf = at?.closest(".kf");
+  if (mk) removeMarker(mk.dataset.id);
+  else if (kf) removeKeysAt(findClip(kf.closest(".clip").dataset.id), Number(kf.dataset.kt));
+  else return;
   e.preventDefault();
-  removeMarker(mk.dataset.id);
 });
 
 // double-click: a small box under the marker with its name, color and Delete
@@ -497,6 +561,27 @@ sc.addEventListener("drop", (e) => {
   addClip(src, { t: snap(Math.max(0, timeAt(e.clientX))), track: rowAt(e)?.dataset.track });
 });
 
+// Modal question with Cancel and a red action button. Resolves true on the action; Esc, Cancel or a click
+// outside resolve false. Cancel has the focus, so Enter does not delete by mistake.
+function ask(title, text, action) {
+  return new Promise((done) => {
+    const d = el("dialog", "modal"), box = el("div"), btns = el("div", "mbtns");
+    const no = el("button", "", "Cancel"), yes = el("button", "danger", action);
+    btns.append(no, yes);
+    box.append(el("h3", "", title), el("p", "", text), btns);
+    d.append(box);
+    document.body.append(d);
+    const close = (v) => { d.close(); d.remove(); done(v); };
+    no.onclick = () => close(false);
+    yes.onclick = () => close(true);
+    d.oncancel = (e) => { e.preventDefault(); close(false); }; // Esc
+    d.onclick = (e) => { if (e.target === d) close(false); }; // the dialog itself is hit only outside the box
+    d.onkeydown = (e) => e.stopPropagation(); // app shortcuts must not run behind the modal
+    d.showModal();
+    no.focus();
+  });
+}
+
 /* ---------- track header buttons and rename ---------- */
 
 $("#tl").addEventListener("click", (e) => {
@@ -504,13 +589,19 @@ $("#tl").addEventListener("click", (e) => {
   if (!b) return;
   const a = b.dataset.act, id = b.closest(".label")?.dataset.track;
   if (a.startsWith("add-")) addTrack(a.slice(4));
-  else if (a === "del") deleteTrack(id);
+  else if (a === "global") toggleGlobal(id);
+  else if (a === "del") {
+    const tr = S.tl.tracks.find((t) => t.id === id), n = tr?.clips.length ?? 0;
+    if (!n) return deleteTrack(id);
+    ask(`Delete track ${tr.name || tr.id}?`, `Its ${n} clip${n > 1 ? "s" : ""} will be deleted too. Undo brings them back.`, "Delete")
+      .then((yes) => yes && deleteTrack(id));
+  }
   else toggleTrack(id, a);
 });
 
 $("#rows").addEventListener("dblclick", (e) => {
   const name = e.target.closest(".tname");
-  if (!name) return;
+  if (!name?.closest(".label").dataset.track) return; // a read-only scene track has no rename
   const id = name.closest(".label").dataset.track, tr = S.tl.tracks.find((t) => t.id === id);
   const input = el("input", "tedit");
   input.value = tr.name || tr.id;
@@ -539,9 +630,11 @@ function setZoom(v) {
   $("#zoom").value = S.pps;
   drawTimeline();
 }
+// fits the scene shown (or the whole video) into the view
 export function zoomFit() {
-  setZoom((sc.clientWidth - LABEL - 24) / Math.max(1, totalDur()));
-  sc.scrollLeft = 0;
+  const { a, b } = S.scene ? S.win : { a: 0, b: totalDur() };
+  setZoom((sc.clientWidth - LABEL - 24) / Math.max(1, b - a));
+  sc.scrollLeft = a * S.pps;
 }
 $("#zoom").addEventListener("input", (e) => setZoom(Number(e.target.value)));
 $("#zoom").addEventListener("change", (e) => e.target.blur()); // a focused slider would swallow shortcuts

@@ -4,75 +4,7 @@
   "height": 1080,
   "tracks": [
     {
-      "id": "V3",
-      "type": "video",
-      "clips": []
-    },
-    {
-      "id": "V4",
-      "type": "video",
-      "clips": []
-    },
-    {
-      "id": "V2",
-      "type": "video",
-      "clips": [
-        {
-          "id": "lt1",
-          "src": "scenes/lower-third/index.html",
-          "start": 1,
-          "duration": 1.2999999999999998,
-          "total": 3
-        },
-        {
-          "id": "cmvjn8p71l01",
-          "src": "scenes/lower-third/index.html",
-          "start": 2.3,
-          "duration": 0.666666666666667,
-          "total": 1.6999999999999997
-        },
-        {
-          "id": "cmvjovhwsoct",
-          "src": "scenes/lower-third/index.html",
-          "start": 2.966666666666667,
-          "duration": 3
-        },
-        {
-          "id": "cmvjov318vwd",
-          "src": "scenes/intro/index.html",
-          "start": 5.966666666666667,
-          "duration": 2.033333333333333,
-          "total": 4,
-          "offset": 1.9666666666666672
-        }
-      ]
-    },
-    {
-      "id": "V1",
-      "type": "video",
-      "clips": [
-        {
-          "id": "cmvjhm4tyqay",
-          "src": "scenes/intro/index.html",
-          "start": 0,
-          "duration": 4
-        },
-        {
-          "id": "cmvjmpfatnh6",
-          "src": "media/reja.jpg",
-          "start": 4,
-          "duration": 3,
-          "props": {
-            "x": 0.5,
-            "y": 0.6495,
-            "scale": 0.3507,
-            "rotation": -3.5
-          }
-        }
-      ]
-    },
-    {
-      "id": "A1",
+      "id": "GA1",
       "type": "audio",
       "clips": [
         {
@@ -84,32 +16,6 @@
           "fadeOut": 1
         }
       ]
-    }
-  ],
-  "markers": [
-    {
-      "id": "cmvjqwsgye0z",
-      "t": 1
-    },
-    {
-      "id": "cmvjqwt2v01c",
-      "t": 2.1
-    },
-    {
-      "id": "cmvjqwtklv45",
-      "t": 2.6666666666666665
-    },
-    {
-      "id": "cmvjqwtta6ua",
-      "t": 2.933333333333333
-    },
-    {
-      "id": "cmvjqwtyia6o",
-      "t": 3.066666666666667
-    },
-    {
-      "id": "cmvjqwu3t7oo",
-      "t": 3.2
     }
   ]
 }

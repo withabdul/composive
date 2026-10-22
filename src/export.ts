@@ -2,7 +2,8 @@ import puppeteer from "puppeteer-core";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "./server.ts";
-import { audible, normalize } from "../ui/canvas/stage.js";
+import { audible } from "../ui/canvas/stage.js";
+import { compose } from "../ui/core/project.js";
 
 const CHROMES = [
   process.env.CHROME_PATH,
@@ -13,18 +14,24 @@ const CHROMES = [
   "/usr/bin/chromium",
 ];
 
-export async function exportVideo(dir: string, out: string) {
+// scene: one scene folder (e.g. "001-hook") with the global tracks under it; else the whole video
+export async function exportVideo(dir: string, out: string, scene?: string) {
   const exe = CHROMES.find((p) => p && existsSync(p));
   if (!exe) throw new Error("Chrome not found. Set CHROME_PATH.");
 
   const server = serve(dir, 0);
-  const tl = normalize(await (await fetch(`http://localhost:${server.port}/api/timeline`)).json());
+  const project = await (await fetch(`http://localhost:${server.port}/api/project`)).json();
+  if (scene && !project.scenes?.some((s: any) => s.slug === scene)) {
+    server.stop(true);
+    throw new Error(`No scene "${scene}". Scenes: ${project.scenes.map((s: any) => s.slug).join(", ") || "none"}`);
+  }
+  const { tl, a, b } = compose(project, scene);
   const clips = tl.tracks.flatMap((t: any) => t.clips);
-  const end = Math.max(0, ...clips.map((c: any) => c.start + c.duration));
-  // in/out markers set in the editor (I / O keys); without them the whole timeline
-  const t0 = Math.max(0, tl.range?.in ?? 0), t1 = Math.min(end, tl.range?.out ?? end);
+  const end = scene ? b : Math.max(0, ...clips.map((c: any) => c.start + c.duration));
+  // a scene: its own time window; else the in/out markers set in the editor (I / O keys), or the whole timeline
+  const t0 = scene ? a : Math.max(0, tl.range?.in ?? 0), t1 = scene ? b : Math.min(end, tl.range?.out ?? end);
   const total = t1 - t0;
-  if (total <= 0) throw new Error(end ? "Export range is empty." : "Timeline is empty.");
+  if (total <= 0) { server.stop(true); throw new Error(end ? "Export range is empty." : "Timeline is empty."); }
   // audio clips cut to the range: a = first, b = last second of the clip that is inside it
   // clips on audio tracks, by mute and solo; a src may be a video file (its sound stream is used)
   const audio = audible(tl)

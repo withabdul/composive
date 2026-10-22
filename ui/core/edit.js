@@ -1,16 +1,45 @@
 // All timeline mutations. Every change ends in commit(): re-sort, re-render, repaint, save.
-import { S, stage, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap } from "./state.js";
+import { S, stage, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast } from "./state.js";
 import { H, record } from "./history.js";
+import { split, isGlobal } from "./project.js";
 import { loadAudio, startAudio } from "../timeline/audio.js";
 
-let saveTimer;
+// The global part goes to timeline.json, the scene shown to scenes/<slug>/timeline.json. S.project
+// keeps the same data, so a switch to another scene builds its view from the latest state.
+let saveTimer = null;
+const sent = new Map(); // url -> last body sent: an unchanged part is not written again
+function put(url, data) {
+  const body = JSON.stringify(data);
+  if (sent.get(url) === body) return;
+  sent.set(url, body);
+  fetch(url, { method: "PUT", body });
+}
+export function flushSave() {
+  if (saveTimer === null) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const { global, scene } = split(S.tl, S.project.timeline, S.scene, S.win.a);
+  S.project.timeline = global;
+  put("/api/timeline", global);
+  const s = scene && S.project.scenes.find((x) => x.slug === S.scene);
+  if (s) { // gone when its folder was deleted on disk
+    s.timeline = scene;
+    put("/api/timeline?scene=" + S.scene, scene);
+  }
+}
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => fetch("/api/timeline", { method: "PUT", body: JSON.stringify(S.tl) }), 200);
+  saveTimer = setTimeout(flushSave, 200);
 }
 
 export function commit() {
-  for (const tr of S.tl.tracks) tr.clips.sort((a, b) => a.start - b.start);
+  S.tl.tracks.sort((a, b) => isGlobal(a) - isGlobal(b)); // scene tracks on top, global tracks below them
+  for (const tr of S.tl.tracks) {
+    // a scene clip cannot start before its scene (one rule here, for every edit that moves clips)
+    if (S.scene && !isGlobal(tr)) for (const c of tr.clips) c.start = Math.max(c.start, S.win.a);
+    tr.clips.sort((a, b) => a.start - b.start);
+  }
+  if (S.scene) S.win.b = Math.max(S.win.a, ...S.tl.tracks.filter((t) => !isGlobal(t)).flatMap((t) => t.clips.map((c) => c.start + c.duration)));
   if (S.playing) startAudio(S.t);
   stage.setTimeline(S.tl);
   stage.render(S.t, S.playing);
@@ -34,6 +63,7 @@ export function splitClip(c, ts, linked = true) {
   for (const x of cs) {
     const b = { ...x, id: uid(), start: ts, duration: x.start + x.duration - ts, offset: (x.offset || 0) + ts - x.start, fadeIn: 0 };
     if (link) b.link = link; else delete b.link; // a half split alone is not linked to the other's sound
+    if (x.keys) b.keys = structuredClone(x.keys); // each half gets its own keys (same times: they use content time)
     b.total = x.total ?? x.duration; // scene keeps its original length so motion continues across the split
     x.total = b.total;
     x.duration = ts - x.start;
@@ -97,28 +127,29 @@ export const place = (cs) => (S.overwrite ? carve : bump)(cs);
 
 /* ---------- tracks ---------- */
 
-// first free id like V3 or A2
-function nextId(prefix) {
+// first free id like V3 or A2; a global track gets a "G" in front (GA1). In "all scenes" new tracks are global.
+function nextId(type, global = !S.scene) {
+  const prefix = (global ? "G" : "") + (type === "audio" ? "A" : "V");
   let n = 1;
   while (S.tl.tracks.some((t) => t.id === prefix + n)) n++;
   return prefix + n;
 }
 
-// an unlocked track of this type (the first, or one free over start..end), else a new one
+// an unlocked track of this type in the group being edited (the first, or one free over start..end), else a new one
 function trackFor(type, start, end) {
-  const ok = (t) => t.type === type && !t.lock;
+  const ok = (t) => t.type === type && !t.lock && isGlobal(t) === !S.scene;
   const free = (t) => end === undefined || t.clips.every((x) => x.start >= end - EPS || x.start + x.duration <= start + EPS);
   let tr = S.tl.tracks.find((t) => ok(t) && free(t));
   if (!tr) {
-    tr = { id: nextId(type === "audio" ? "A" : "V"), type, clips: [] };
+    tr = { id: nextId(type), type, clips: [] };
     type === "audio" ? S.tl.tracks.push(tr) : S.tl.tracks.unshift(tr); // new video goes on top, new audio at the bottom
   }
   return tr;
 }
 
-// a new empty track next to `tr`: above it for video (a layer in front), below it for audio
+// a new empty track next to `tr` (in its group): above it for video (a layer in front), below it for audio
 function trackNextTo(tr) {
-  const nt = { id: nextId(tr.type === "audio" ? "A" : "V"), type: tr.type, clips: [] };
+  const nt = { id: nextId(tr.type, isGlobal(tr)), type: tr.type, clips: [] };
   const i = S.tl.tracks.indexOf(tr);
   S.tl.tracks.splice(tr.type === "audio" ? i + 1 : i, 0, nt);
   return nt;
@@ -137,8 +168,18 @@ export function bump(cs) {
 
 export function addTrack(type) {
   record();
-  const tr = { id: nextId(type === "audio" ? "A" : "V"), type, clips: [] };
+  const tr = { id: nextId(type), type, clips: [] };
   type === "audio" ? S.tl.tracks.push(tr) : S.tl.tracks.unshift(tr);
+  commit();
+}
+
+// G button on a track header (scene view): the track moves between this scene and the global tracks.
+// Clips keep their video time; a global track made a scene track has its clips held inside the scene by commit().
+export function toggleGlobal(id) {
+  const tr = S.tl.tracks.find((t) => t.id === id);
+  if (!tr || !S.scene) return;
+  record();
+  tr.id = nextId(tr.type, !isGlobal(tr));
   commit();
 }
 
@@ -226,6 +267,60 @@ export function duplicate(cs) {
   if (cs.length) insertCopies(snapshot(cs), Math.max(...cs.map((c) => c.start + c.duration)));
 }
 export const duplicateClip = (c) => duplicate(withLinked([c]));
+
+/* ---------- keyframes (clip.keys, see canvas/stage.js) ---------- */
+
+// clip-local time of timeline time t (the time keyframes use), on a whole frame
+export const localAt = (c, t = S.t) => snap(t) - c.start + (c.offset || 0);
+const keyAt = (ks, lt) => ks?.find((k) => Math.abs(k.t - lt) < EPS);
+
+// Writes a prop at the playhead: into its keyframes when it has some (auto-key: a key there is
+// changed or added), else as the clip's fixed value. The caller commits.
+export function setProp(c, key, v) {
+  if (typeof v === "number" && !Number.isFinite(v)) return; // NaN would be saved as null (e.g. resize of a 0-size box)
+  const ks = c.keys?.[key];
+  if (!ks?.length) { c.props = { ...c.props, [key]: v }; return; }
+  const lt = localAt(c), k = keyAt(ks, lt);
+  if (k) k.v = v;
+  else { ks.push({ t: lt, v }); ks.sort((a, b) => a.t - b.t); }
+}
+
+// ◆ in the panel: add a key at the playhead with the value seen now, or remove the key there.
+// Removing the last key keeps its value as the clip's fixed value.
+export function toggleKey(c, key, now) {
+  record();
+  const lt = localAt(c), ks = ((c.keys ??= {})[key] ??= []), k = keyAt(ks, lt);
+  if (!k) { ks.push({ t: lt, v: now }); ks.sort((a, b) => a.t - b.t); }
+  else {
+    ks.splice(ks.indexOf(k), 1);
+    if (!ks.length) {
+      delete c.keys[key];
+      c.props = { ...c.props, [key]: k.v };
+    }
+  }
+  if (!Object.keys(c.keys).length) delete c.keys;
+  commit();
+}
+
+export function setEase(c, key, ease) {
+  const k = keyAt(c.keys?.[key], localAt(c));
+  if (!k || (k.ease ?? "linear") === ease) return;
+  record();
+  if (ease === "linear") delete k.ease; else k.ease = ease;
+  commit();
+}
+
+// all keys of a clip at clip-local time lt (a ◆ on the timeline)
+export function removeKeysAt(c, lt) {
+  record();
+  for (const [key, ks] of Object.entries(c.keys ?? {})) {
+    const left = ks.filter((k) => Math.abs(k.t - lt) >= EPS);
+    if (left.length) c.keys[key] = left;
+    else { c.props = { ...c.props, [key]: ks.find((k) => Math.abs(k.t - lt) < EPS).v }; delete c.keys[key]; }
+  }
+  if (c.keys && !Object.keys(c.keys).length) delete c.keys;
+  commit();
+}
 
 /* ---------- markers ---------- */
 
@@ -333,7 +428,7 @@ export async function addClip(src, at) {
     start = Math.max(0, at.t);
     tr = S.tl.tracks.find((t) => t.id === at.track && t.type === type && !t.lock);
     if (!tr && at.track === undefined) { // below the tracks: a new last track of this type
-      tr = { id: nextId(type === "audio" ? "A" : "V"), type, clips: [] };
+      tr = { id: nextId(type), type, clips: [] };
       const lastVideo = S.tl.tracks.findLastIndex((t) => t.type !== "audio");
       S.tl.tracks.splice(type === "audio" ? S.tl.tracks.length : lastVideo + 1, 0, tr);
     }
@@ -365,12 +460,14 @@ export function removeEmptyTracks() {
   commit();
 }
 
-function step(from, to) {
-  if (!from.length || S.drag) return;
+function step(from, to, name) {
+  if (S.drag) return;
+  if (!from.length) return toast(`Nothing to ${name.toLowerCase()}`);
   to.push(JSON.stringify(S.tl));
   S.tl = JSON.parse(from.pop());
   if (!findClip(S.sel)) S.sel = null;
   commit();
+  toast(name);
 }
-export const undo = () => step(H.undo, H.redo);
-export const redo = () => step(H.redo, H.undo);
+export const undo = () => step(H.undo, H.redo, "Undo");
+export const redo = () => step(H.redo, H.undo, "Redo");

@@ -7,9 +7,9 @@ export const kind = (src) =>
   : /\.(mp3|wav|m4a|ogg)$/i.test(src) ? "audio"
   : "image";
 
+let n = 0; // module wide: clips of two scene files read in the same ms must not get the same id
 export function normalize(tl) {
   tl.fps ??= 30; tl.width ??= 1920; tl.height ??= 1080; tl.tracks ??= [];
-  let n = 0;
   for (const tr of tl.tracks) {
     tr.type ??= "video"; tr.clips ??= [];
     for (const c of tr.clips) c.id ??= `c${Date.now().toString(36)}${n++}`;
@@ -24,11 +24,50 @@ export function audible(tl) {
   return aud.filter((t) => (solo ? t.solo : !t.mute)).flatMap((t) => t.clips);
 }
 
+/* ---------- keyframes ---------- */
+// clip.keys = { prop: [{ t, v, ease }] }, sorted by t. t is clip-local time (offset included, the
+// same time a scene gets), so keys stay on the content when the clip is moved, trimmed or split.
+// `ease` shapes the way from that key to the next one.
+export const EASES = ["linear", "in", "out", "inout", "hold"];
+const EASE = {
+  linear: (p) => p,
+  in: (p) => p * p * p,
+  out: (p) => 1 - (1 - p) ** 3,
+  inout: (p) => (p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2),
+  hold: () => 0, // keep the value until the next key
+};
+const HEX = /^#[0-9a-f]{6}$/i;
+const rgb = (s) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16));
+function lerp(a, b, p) {
+  if (typeof a === "number" && typeof b === "number") return a + (b - a) * p;
+  if (HEX.test(a) && HEX.test(b)) {
+    const x = rgb(a), y = rgb(b);
+    return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * p).toString(16).padStart(2, "0")).join("");
+  }
+  return p < 1 ? a : b; // other values change at the next key
+}
+
+export function keyValue(ks, t) {
+  if (t <= ks[0].t) return ks[0].v;
+  const i = ks.findIndex((k) => k.t > t);
+  if (i < 0) return ks.at(-1).v;
+  const a = ks[i - 1], b = ks[i];
+  return lerp(a.v, b.v, (EASE[a.ease] ?? EASE.linear)((t - a.t) / (b.t - a.t)));
+}
+
+// the props of clip c at clip-local time `local`: defaults, then the clip's props, then its keyframes
+export function propsAt(c, defaults, local) {
+  const p = { ...defaults, ...c.props };
+  for (const [k, ks] of Object.entries(c.keys ?? {})) if (ks.length) p[k] = keyValue(ks, local);
+  return p;
+}
+
 // Video and image clips get these props; x and y are the center, as fractions of the frame.
-const MEDIA_PROPS = { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 };
+// sx, sy stretch the width and height on top of scale.
+const MEDIA_PROPS = { x: 0.5, y: 0.5, scale: 1, sx: 1, sy: 1, rotation: 0, opacity: 1 };
 
 function place(el, p) {
-  el.style.transform = `translate(${(p.x - 0.5) * 100}%, ${(p.y - 0.5) * 100}%) rotate(${p.rotation}deg) scale(${p.scale})`;
+  el.style.transform = `translate(${(p.x - 0.5) * 100}%, ${(p.y - 0.5) * 100}%) rotate(${p.rotation}deg) scale(${p.scale * p.sx}, ${p.scale * p.sy})`;
   el.style.opacity = p.opacity;
 }
 
@@ -95,12 +134,13 @@ export function createStage(root, base = "/p/") {
         if (!nodes.has(id)) nodes.set(id, make(c));
         const n = nodes.get(id);
         n.c = c;
-        n.el.style.zIndex = z; // first track = top layer
-        if (n.k !== "scene") place(n.el, { ...n.defaults, ...c.props });
+        n.el.style.zIndex = z; // first track = top layer (props are applied by render)
       }
     },
     ready: () => Promise.all([...nodes.values()].map((n) => n.ready)),
     defaults: (id) => nodes.get(id)?.defaults ?? {},
+    win: (id) => (nodes.get(id)?.k === "scene" ? nodes.get(id).el.contentWindow : null), // a scene's window
+    props: (id) => nodes.get(id)?.p, // the props of the last rendered frame (keyframes applied)
     // length of a video clip's source file in seconds, or Infinity if not known (yet)
     srcDuration(id) {
       const d = nodes.get(id)?.el.duration;
@@ -111,6 +151,7 @@ export function createStage(root, base = "/p/") {
       const n = nodes.get(id);
       if (!n || n.el.style.display === "none") return null;
       if (n.k === "scene") {
+        try { const own = n.el.contentWindow.box?.(); if (own) return own; } catch {} // a scene can report its own (rotated) box
         let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
         try {
           const style = n.el.contentWindow.getComputedStyle;
@@ -124,10 +165,10 @@ export function createStage(root, base = "/p/") {
         } catch { return null; }
         return r > l ? { cx: (l + r) / 2, cy: (t + b) / 2, w: r - l, h: b - t, rot: 0 } : null;
       }
-      const p = { ...n.defaults, ...n.c.props };
+      const p = n.p ?? { ...n.defaults, ...n.c.props };
       const nw = n.el.videoWidth || n.el.naturalWidth || tl.width, nh = n.el.videoHeight || n.el.naturalHeight || tl.height;
       const k = Math.min(tl.width / nw, tl.height / nh) * p.scale; // object-fit: contain
-      return { cx: p.x * tl.width, cy: p.y * tl.height, w: nw * k, h: nh * k, rot: p.rotation };
+      return { cx: p.x * tl.width, cy: p.y * tl.height, w: nw * k * (p.sx ?? 1), h: nh * k * (p.sy ?? 1), rot: p.rotation };
     },
     // Is there clip content at (x, y), in stage pixels?
     hit(id, x, y) {
@@ -158,10 +199,14 @@ export function createStage(root, base = "/p/") {
         n.el.style.display = on ? "" : "none";
         if (!on) { if (n.k === "video" && !n.el.paused) n.el.pause(); continue; }
         const local = t - c.start + (c.offset ?? 0);
-        if (n.k === "scene") {
-          jobs.push(n.ready.then(() => { try { return n.el.contentWindow.seek?.(local, c.total ?? c.duration, { ...n.defaults, ...c.props }); } catch {} }));
-        } else if (n.k === "video") {
-          jobs.push(n.ready.then(() => syncVideo(n.el, local, playing)));
+        if (n.k === "scene") { // its defaults are known once loaded
+          jobs.push(n.ready.then(() => {
+            n.p = propsAt(c, n.defaults, local);
+            try { return n.el.contentWindow.seek?.(local, c.total ?? c.duration, n.p); } catch {}
+          }));
+        } else {
+          place(n.el, (n.p = propsAt(c, n.defaults, local)));
+          if (n.k === "video") jobs.push(n.ready.then(() => syncVideo(n.el, local, playing)));
         }
       }
       await Promise.all(jobs);
