@@ -1,0 +1,8 @@
+node_modules/
+# local code index (codebase-memory), rebuilt on demand
+.codebase-memory/
+# export output and test leftovers
+*.mp4.part
+out*.mp4
+*.perf-backup
+*.smoke-backup

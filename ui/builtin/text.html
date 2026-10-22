@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Built-in text scene ("@text"). x and y are fractions of the frame; the viewer can drag them. -->
+<meta name="props" content='{"text":"Text","size":96,"color":"#ffffff","weight":700,"font":"system-ui, sans-serif","x":0.5,"y":0.5}'>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #t { position: absolute; transform: translate(-50%, -50%); width: max-content; max-width: 90%; text-align: center;
+       white-space: pre-wrap; line-height: 1.15; text-shadow: 0 2px 12px rgba(0, 0, 0, .45); }
+</style>
+<div id="t"></div>
+<script>
+  const t = document.getElementById("t");
+  window.seek = (_time, _duration, p) => {
+    t.textContent = p.text;
+    t.style.left = p.x * 100 + "%";
+    t.style.top = p.y * 100 + "%";
+    t.style.fontSize = p.size + "px";
+    t.style.fontWeight = p.weight;
+    t.style.fontFamily = p.font;
+    t.style.color = p.color;
+  };
+</script>

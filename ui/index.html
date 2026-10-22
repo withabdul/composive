@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>composive</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header id="top">
+  <b>composive</b>
+  <input id="folder" disabled title="Project folder">
+  <select id="scenePick" title="Scene"></select>
+  <code id="scenePath">-</code>
+</header>
+
+<aside id="side">
+  <nav id="tabs">
+    <button data-tab="scenes" class="on" tabindex="-1">Scenes</button>
+    <button data-tab="media" tabindex="-1">Media</button>
+  </nav>
+  <section data-pane="scenes">
+    <div id="presets" title="Click: add at the playhead. Drag: drop on the timeline.">
+      <button data-preset="text" tabindex="-1">+ Text</button>
+      <button data-preset="shape" tabindex="-1">+ Shape</button>
+      <button data-preset="lower" tabindex="-1">+ Lower third</button>
+      <button data-preset="solid" tabindex="-1">+ Solid</button>
+    </div>
+    <div id="scenes"></div>
+  </section>
+  <section data-pane="media" hidden>
+    <div id="drop">
+      <svg viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/></svg>
+      <span>Drop files or a folder</span>
+      <div>
+        <label class="imp">Files<input id="impFiles" type="file" multiple hidden></label>
+        <label class="imp">Folder<input id="impFolder" type="file" webkitdirectory hidden></label>
+      </div>
+    </div>
+    <div id="uploads"></div>
+    <div id="mfilter">
+      <input id="msearch" type="search" placeholder="Search media">
+      <select id="mtype" title="Type">
+        <option value="">All</option><option value="video">Video</option>
+        <option value="image">Image</option><option value="audio">Audio</option>
+      </select>
+    </div>
+    <div id="media"></div>
+    <p id="mempty" hidden></p>
+  </section>
+</aside>
+
+<main id="viewer">
+  <div id="fit"><div id="stage"><div id="overlay"></div></div></div>
+  <div id="transport">
+    <button id="play" tabindex="-1">Play</button>
+    <span id="time">0:00.00 / 0:00.00</span>
+    <div id="meter" title="Output level"><i></i></div>
+  </div>
+</main>
+
+<section id="tl">
+  <div id="tools">
+    <button data-tool="view" tabindex="-1" title="View: select, move, trim (V)" aria-label="View">
+      <svg viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
+    </button>
+    <button data-tool="pan" tabindex="-1" title="Pan: drag to scroll (H)" aria-label="Pan">
+      <svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+    </button>
+    <button data-tool="cut" tabindex="-1" title="Cut: click a clip to delete it (X)" aria-label="Cut">
+      <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+    </button>
+    <button data-tool="split" tabindex="-1" title="Split: click a clip to split it there (S)" aria-label="Split">
+      <svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/></svg>
+    </button>
+    <span class="sep"></span>
+    <button id="magnet" tabindex="-1" title="Magnet (M): delete and trim close the gap. Shift = the other way" aria-label="Magnet">
+      <svg viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0 0 12 0V3"/><path d="M6 7h4M14 7h4"/></svg>
+    </button>
+    <button id="overwrite" tabindex="-1" title="Overwrite (W): a clip moved, trimmed or pasted onto another cuts it. Off: it goes to the nearest free spot" aria-label="Overwrite">
+      <svg viewBox="0 0 24 24"><rect x="3" y="8" width="11" height="10" rx="1"/><rect x="10" y="5" width="11" height="10" rx="1"/></svg>
+    </button>
+    <button id="cleanTracks" tabindex="-1" title="Remove empty tracks" aria-label="Remove empty tracks">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5M14 11v5"/></svg>
+    </button>
+    <span class="sep"></span>
+    <button id="undo" tabindex="-1" title="Undo (Ctrl+Z)" aria-label="Undo">
+      <svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+    </button>
+    <button id="redo" tabindex="-1" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" aria-label="Redo">
+      <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </button>
+    <label title="Zoom (Ctrl+wheel)">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input id="zoom" type="range" min="10" max="400" value="80">
+    </label>
+  </div>
+  <div id="tlscroll">
+    <div id="tlinner"><div id="ruler"></div><div id="rows"></div><div id="playhead"></div><div id="snapline" hidden></div><div id="marquee" hidden></div></div>
+  </div>
+</section>
+
+<aside id="panel" hidden>
+  <header><b id="pTitle">Clip</b><button id="pClose" tabindex="-1" title="Close panel" aria-label="Close panel">&times;</button></header>
+  <div id="pBody"></div>
+</aside>
+
+<script type="module" src="/ui/app.js"></script>
+</body>
+</html>

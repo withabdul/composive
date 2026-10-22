@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="duration" content="4">
+<meta name="props" content='{"title":"Composive","x":0.5,"y":0.5}'>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+  body { background: linear-gradient(135deg, #1b2a49, #5b2a86); font: 700 120px system-ui, sans-serif; color: #fff; }
+  #t { position: absolute; width: max-content; }
+</style>
+<div id="t"></div>
+<script>
+  // Contract: draw the frame for local time t (seconds) with the given props. Must be deterministic, no timers.
+  window.seek = (t, duration, props = { title: "Composive", x: 0.5, y: 0.5 }) => {
+    const inP = Math.min(1, t / 1), outP = Math.min(1, Math.max(0, (duration - t) / 0.5));
+    const e = 1 - Math.pow(1 - inP, 3);
+    const el = document.getElementById("t");
+    el.textContent = props.title;
+    el.style.left = props.x * 100 + "%";
+    el.style.top = props.y * 100 + "%";
+    el.style.transform = `translate(-50%, calc(-50% + ${(1 - e) * 80}px))`;
+    el.style.opacity = Math.min(e, outP);
+  };
+  seek(0, 4);
+</script>

@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  #s { position: relative; overflow: hidden; background: #000; }
+  .layer { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: contain; background: transparent; }
+</style>
+<div id="s"></div>
+<script type="module">
+  import { createStage, normalize } from "/ui/canvas/stage.js";
+  const stage = createStage(document.getElementById("s"));
+  const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  window.__init = async (tl) => { stage.setTimeline(normalize(tl)); await stage.ready(); };
+  window.__frame = async (t) => { await stage.render(t); await raf(); };
+</script>

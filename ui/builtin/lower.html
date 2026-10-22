@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Built-in lower third ("@lower"): a name bar that slides in and fades out. x, y = its top-left corner,
+     as fractions of the frame; the viewer can drag them. -->
+<meta name="duration" content="4">
+<meta name="props" content='{"title":"Name Surname","sub":"Role or topic","color":"#ffffff","accent":"#5b9dff","size":48,"x":0.06,"y":0.74}'>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: system-ui, sans-serif; }
+  #b { position: absolute; padding: 18px 32px 18px 26px; background: rgba(10, 12, 18, .82); border-left: 8px solid; }
+  #t { font-weight: 700; line-height: 1.1; }
+  #s { margin-top: 6px; opacity: .75; line-height: 1.2; }
+</style>
+<div id="b"><div id="t"></div><div id="s"></div></div>
+<script>
+  const b = document.getElementById("b"), t = document.getElementById("t"), s = document.getElementById("s");
+  window.seek = (time, duration, p) => {
+    const e = 1 - Math.pow(1 - Math.min(1, time / 0.6), 3); // ease out over 0.6 s
+    t.textContent = p.title;
+    s.textContent = p.sub;
+    Object.assign(b.style, {
+      left: p.x * 100 + "%", top: p.y * 100 + "%", color: p.color, borderLeftColor: p.accent,
+      transform: `translateX(${(1 - e) * -60}px)`, opacity: Math.min(e, Math.max(0, (duration - time) / 0.4)),
+    });
+    t.style.fontSize = p.size + "px";
+    s.style.fontSize = p.size * 0.55 + "px";
+  };
+</script>

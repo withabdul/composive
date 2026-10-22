@@ -1,0 +1,248 @@
+// Right panel: edit the selected clip or clips (timing, audio, props, track, raw JSON, actions).
+// The form is rebuilt only when what it is built from changes (keyOf); otherwise the inputs are
+// just synced, so typing never loses focus. With several clips selected, the fields show the main
+// clip and an edit applies to all of them (start moves them all by the same amount).
+import { $, S, el, MIN, bus, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
+import { pushUndo } from "../core/history.js";
+import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack } from "../core/edit.js";
+import { ui } from "../canvas/viewer.js";
+
+const FALLBACK = { offset: 0, fadeIn: 0, fadeOut: 0, volume: 1 };
+const body = $("#pBody");
+let shownKey = "", lastSel = null, closedFor = null, focusSnap = null;
+
+// props that every selected clip has, with the main clip's defaults
+function commonProps(cs, c) {
+  const d = stage.defaults(c.id);
+  return Object.keys(d).filter((k) => cs.every((x) => typeof stage.defaults(x.id)[k] === typeof d[k]));
+}
+
+// what the form is built from: rebuild when any of it changes
+const keyOf = (c) => {
+  const tr = trackOf(c), cs = selected();
+  return [selIds().join(), c.src, clipKind(c), !!c.link, tr.id, tr.name, tr.mute, tr.solo, tr.hide, tr.lock,
+    cs.map(clipKind).join(), commonProps(cs, c).join()].join("|");
+};
+
+function read(c, path) {
+  if (path.startsWith("props.")) {
+    const k = path.slice(6);
+    return c.props?.[k] ?? stage.defaults(c.id)[k];
+  }
+  return c[path] ?? FALLBACK[path];
+}
+
+function group(title) {
+  const g = el("div", "pg");
+  g.append(el("h4", "", title));
+  body.append(g);
+  return g;
+}
+
+function field(g, label, path, type, attrs = {}) {
+  const row = el("label", "pf");
+  const input = el(type === "area" ? "textarea" : "input");
+  if (type !== "area") input.type = type;
+  Object.assign(input, attrs);
+  input.dataset.path = path;
+  const name = el("span", "", label);
+  if (type === "number") scrub(name, input);
+  row.append(name, input);
+  g.append(row);
+}
+
+// Drag a number field's label left/right to change it: 1 step per 2 px, Shift x10, Alt x0.1.
+// One drag = one undo step.
+function scrub(name, input) {
+  name.classList.add("scrub");
+  name.title = "Drag left or right (Shift = faster, Alt = finer)";
+  name.onclick = (e) => e.preventDefault(); // a click on a <label> would focus the input
+  name.onpointerdown = (e) => {
+    if (e.button) return;
+    e.preventDefault();
+    name.setPointerCapture(e.pointerId);
+    const step = Number(input.step) || 1, v0 = input.valueAsNumber || 0, x0 = e.clientX, snap0 = JSON.stringify(S.tl);
+    name.onpointermove = (m) => {
+      const k = m.shiftKey ? 10 : m.altKey ? 0.1 : 1;
+      const dec = Math.max(0, -Math.floor(Math.log10(step * k) + 1e-9)); // decimals of the step: 0.05 -> 2
+      input.value = (v0 + Math.round((m.clientX - x0) / 2) * step * k).toFixed(dec);
+      apply(input);
+    };
+    name.onpointerup = () => {
+      name.onpointermove = name.onpointerup = null;
+      if (JSON.stringify(S.tl) !== snap0) { pushUndo(snap0); ui(); }
+    };
+  };
+}
+
+function button(g, text, onclick) {
+  const b = el("button", "", text);
+  b.tabIndex = -1;
+  b.onclick = onclick;
+  g.append(b);
+}
+
+// JSON highlighting: a colored <pre> sits under a transparent textarea (no library).
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const span = (cls, s) => `<span class="${cls}">${s}</span>`;
+function highlight(src) {
+  return esc(src).replace(/("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+\.?\d*(?:[eE][+-]?\d+)?|[{}\[\],]/g,
+    (m, str, colon, lit) => str ? (colon ? span("jk", str) + span("jp", colon) : span("js", str))
+      : lit ? span(lit === "null" ? "jl" : "jb", m)
+      : /^[{}\[\],]$/.test(m) ? span("jp", m) : span("jn", m));
+}
+let painted = null;
+function paintJson() {
+  const json = $("#pJson");
+  if (json.value === painted && json.previousSibling.innerHTML) return; // same text: skip the regex
+  painted = json.value;
+  // the <pre> is in the flow and sets the height; the textarea lies over it (CSS), so no height is measured here
+  json.previousSibling.innerHTML = highlight(json.value) + "\n"; // the extra newline keeps the last empty line's height
+}
+
+function build(c) {
+  body.innerHTML = "";
+  const cs = selected(), many = cs.length > 1;
+  const k = clipKind(c), parts = c.src.split("/"); // the sound of a video file counts as audio
+  $("#pTitle").textContent = many ? `${cs.length} clips`
+    : c.src[0] === "@" ? c.src.slice(1) : k === "scene" ? parts.at(-2) : parts.at(-1);
+
+  const timing = group("Timing");
+  for (const p of ["start", "duration", "offset"]) field(timing, p, p, "number", { step: "0.1" });
+
+  if (cs.every((x) => clipKind(x) === "audio")) {
+    const a = group("Audio");
+    field(a, "volume", "volume", "number", { step: "0.05" });
+    field(a, "fadeIn", "fadeIn", "number", { step: "0.1" });
+    field(a, "fadeOut", "fadeOut", "number", { step: "0.1" });
+  }
+
+  const defaults = stage.defaults(c.id), keys = commonProps(cs, c);
+  if (keys.length) {
+    const g = group("Props");
+    for (const key of keys) {
+      const d = defaults[key], path = "props." + key;
+      if (typeof d === "number") field(g, key, path, "number", { step: key === "rotation" || Math.abs(d) > 1 ? "1" : "0.01" });
+      else if (typeof d === "boolean") field(g, key, path, "checkbox");
+      else if (typeof d === "string" && /^#[0-9a-f]{6}$/i.test(d)) field(g, key, path, "color");
+      else field(g, key, path, key === "text" || String(d).includes("\n") ? "area" : "text");
+    }
+  }
+
+  trackGroup(trackOf(c));
+
+  const act = group("Actions");
+  act.classList.add("pa");
+  button(act, "Split at playhead", () => splitClip(findClip(S.sel), snap(S.t)));
+  button(act, "Duplicate", () => duplicate(selected()));
+  button(act, "Delete", () => removeClips(selected()));
+  if (c.link) button(act, "Unlink (Ctrl+L)", toggleLink);
+  else if (many) button(act, "Link selected (Ctrl+L)", toggleLink);
+
+  if (many) return; // raw JSON is for one clip
+  const raw = group("JSON");
+  const ed = el("div", "jed"), pre = el("pre"), json = el("textarea");
+  json.id = "pJson";
+  json.spellcheck = false;
+  json.oninput = paintJson;
+  json.onchange = () => {
+    const cur = findClip(S.sel);
+    try {
+      const next = JSON.parse(json.value);
+      if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error("not an object");
+      for (const key of Object.keys(cur)) delete cur[key];
+      Object.assign(cur, next, { id: S.sel }); // the id is not editable
+      ed.classList.remove("bad");
+      commit();
+    } catch (err) {
+      ed.classList.add("bad");
+      ed.title = String(err);
+    }
+  };
+  ed.append(pre, json);
+  raw.append(ed);
+}
+
+// The main clip's track: name and flags. These call the track actions, which record their own undo step.
+function trackGroup(tr) {
+  const g = group("Track");
+  const row = el("label", "pf"), name = el("input");
+  name.value = tr.name || tr.id;
+  name.onchange = (e) => { e.stopPropagation(); renameTrack(tr.id, name.value); focusSnap = JSON.stringify(S.tl); };
+  row.append(el("span", "", "name"), name);
+  g.append(row);
+  const flags = tr.type === "audio" ? ["mute", "solo", "lock"] : ["hide", "lock"];
+  const box = el("div", "pflags");
+  for (const key of flags) {
+    const l = el("label"), cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = !!tr[key];
+    cb.onchange = (e) => { e.stopPropagation(); toggleTrack(tr.id, key); focusSnap = JSON.stringify(S.tl); };
+    l.append(cb, key);
+    box.append(l);
+  }
+  g.append(box);
+}
+
+function sync(c) {
+  for (const input of body.querySelectorAll("[data-path]")) {
+    if (input === document.activeElement) continue;
+    const v = read(c, input.dataset.path);
+    if (input.type === "checkbox") input.checked = !!v;
+    else input.value = v ?? "";
+  }
+  const json = $("#pJson");
+  if (json && json !== document.activeElement) json.value = JSON.stringify(c, null, 2);
+  if (json) paintJson();
+}
+
+function render() {
+  if (S.sel !== lastSel) { lastSel = S.sel; closedFor = null; }
+  const c = S.sel && findClip(S.sel);
+  const show = !!c && closedFor !== c.id;
+  $("#panel").hidden = !show;
+  document.body.classList.toggle("panel", show);
+  if (!show) { shownKey = ""; return; }
+  if (keyOf(c) !== shownKey) {
+    build(c);
+    shownKey = keyOf(c);
+    // a scene's props are known only after it has loaded; rebuild once if they changed
+    stage.ready().then(() => { if (S.sel === c.id && keyOf(c) !== shownKey) render(); });
+  }
+  sync(c);
+}
+
+// Writes a field to every selected clip. `start` moves them all by the main clip's change, so a
+// group (or a video and its linked sound) keeps its spacing.
+function apply(input) {
+  const path = input.dataset.path, main = findClip(S.sel), cs = selected();
+  let v = input.type === "checkbox" ? input.checked : input.type === "number" ? input.valueAsNumber : input.value;
+  if (Number.isNaN(v) || !main) return;
+  if (path.startsWith("props.")) {
+    const key = path.slice(6);
+    for (const c of cs) if (key in stage.defaults(c.id)) c.props = { ...c.props, [key]: v };
+  } else if (path === "start") {
+    const d = Math.max(0, v) - main.start;
+    for (const c of cs) c.start = Math.max(0, c.start + d);
+  } else {
+    if (path === "offset" || path === "fadeIn" || path === "fadeOut" || path === "volume") v = Math.max(0, v);
+    if (path === "duration") v = Math.max(MIN, v);
+    for (const c of cs) { c[path] = v; clampFades(c); }
+  }
+  commit();
+}
+
+// One edited field = one undo step, recorded when the field is left.
+body.addEventListener("focusin", () => { focusSnap = JSON.stringify(S.tl); });
+body.addEventListener("input", (e) => {
+  if (e.target.dataset.path) apply(e.target);
+});
+const flush = () => {
+  if (focusSnap && JSON.stringify(S.tl) !== focusSnap) { pushUndo(focusSnap); ui(); }
+  focusSnap = JSON.stringify(S.tl);
+};
+body.addEventListener("change", flush);
+body.addEventListener("focusout", flush);
+
+$("#pClose").onclick = () => { closedFor = S.sel; render(); };
+bus.addEventListener("redraw", render);
