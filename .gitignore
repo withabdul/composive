@@ -6,3 +6,6 @@ node_modules/
 out*.mp4
 *.perf-backup
 *.smoke-backup
+# projects are local work; only the demo is shared
+projects/*
+!projects/example/
