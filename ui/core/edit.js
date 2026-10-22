@@ -8,12 +8,15 @@ import { loadAudio, startAudio } from "../timeline/audio.js";
 // keeps the same data, so a switch to another scene builds its view from the latest state.
 let saveTimer = null;
 const sent = new Map(); // url -> last body sent: an unchanged part is not written again
+let writes = Promise.resolve();
 function put(url, data) {
   const body = JSON.stringify(data);
   if (sent.get(url) === body) return;
   sent.set(url, body);
-  fetch(url, { method: "PUT", body });
+  writes = Promise.all([writes, fetch(url, { method: "PUT", body }).catch(() => {})]);
 }
+// every edit is on disk (the export reads the files)
+export function saved() { flushSave(); return writes; }
 export function flushSave() {
   if (saveTimer === null) return;
   clearTimeout(saveTimer);

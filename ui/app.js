@@ -9,6 +9,7 @@ import { drawSide, forgetSide } from "./sidebar/sidebar.js";
 import { zoomFit } from "./timeline/timeline.js"; // timeline, import and panel also register their own listeners
 import { forgetStrip } from "./timeline/filmstrip.js";
 import "./sidebar/import.js";
+import "./export.js";
 import "./panel/panel.js";
 import { nudge } from "./canvas/gizmo.js";
 

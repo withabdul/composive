@@ -90,7 +90,7 @@ export function serve(dir: string, port = 9999) {
   watch(root, { recursive: true }, (_, name) => {
     if (!name) return;
     const n = name.replaceAll("\\", "/");
-    if (/^(\.git|node_modules)(\/|$)/.test(n)) return;
+    if (/^(\.git|node_modules|exports)(\/|$)/.test(n)) return; // exports/: a video being written
     clearTimeout(timers.get(n));
     timers.set(n, setTimeout(async () => {
       const p = join(root, n);
@@ -104,7 +104,10 @@ export function serve(dir: string, port = 9999) {
     if (name) send(`data: templates/${name.replaceAll("\\", "/")}\n\n`);
   });
 
-  return Bun.serve({
+  // one export at a time, started by the editor's Export button; GET /api/export reads its progress
+  let job: { state: string; file: string; i: number; n: number; error?: string; ctl: AbortController } | null = null;
+
+  const server = Bun.serve({
     port,
     idleTimeout: 255,
     maxRequestBodySize: 2 * 1024 ** 3, // uploaded videos can be large
@@ -154,6 +157,34 @@ export function serve(dir: string, port = 9999) {
         } catch {
           return new Response("no ffprobe", { status: 404 }); // also a bad path
         }
+      }
+
+      // POST ?scene=001-hook&name=x starts one (no scene = the whole video) into exports/<name>.mp4,
+      // DELETE cancels it, GET = { state: running|done|error|cancelled, file, i, n, error }
+      if (pathname === "/api/export") {
+        if (req.method === "POST") {
+          if (job?.state === "running") return new Response("an export is running", { status: 409 });
+          const scene = searchParams.get("scene") || undefined;
+          if (scene && !SCENE.test(scene)) return new Response("bad scene", { status: 400 });
+          const name = (searchParams.get("name") ?? "").replace(/\.mp4$/i, "").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "");
+          if (!name) return new Response("bad name", { status: 400 });
+          mkdirSync(join(root, "exports"), { recursive: true });
+          let file = `exports/${name}.mp4`, k = 0;
+          while (existsSync(join(root, file))) file = `exports/${name}-${++k}.mp4`;
+          const j = (job = { state: "running", file, i: 0, n: 0, ctl: new AbortController() });
+          const { exportVideo } = await import("./export.ts"); // export.ts imports this file
+          exportVideo(root, join(root, file), scene, { port: server.port, signal: j.ctl.signal, onFrame: (i, n) => { j.i = i; j.n = n; } })
+            .then(() => { j.state = "done"; })
+            .catch((e) => {
+              j.state = j.ctl.signal.aborted ? "cancelled" : "error";
+              j.error = String(e?.message ?? e).trim();
+              if (j.state === "error") console.error("export failed:", j.error);
+            });
+          return Response.json({ file });
+        }
+        if (req.method === "DELETE") { job?.ctl.abort(); return new Response("ok"); }
+        const { ctl, ...rest } = job ?? { state: "idle", ctl: null };
+        return Response.json(rest);
       }
 
       if (pathname === "/") return sendFile(req, join(UI, "index.html"));
@@ -209,7 +240,7 @@ export function serve(dir: string, port = 9999) {
               clips: files.map((p) => p.match(new RegExp(`^scenes/${slug}/([^/]+)/index\\.html$`)))
                 .filter(Boolean).map((m) => ({ name: m![1], path: m![0] })),
             }))),
-            media: files.filter((p) => MEDIA.test(p)),
+            media: files.filter((p) => MEDIA.test(p) && !p.startsWith("exports/")),
             templates: await templates(),
           });
         } catch (e) {
@@ -220,4 +251,5 @@ export function serve(dir: string, port = 9999) {
       return new Response("not found", { status: 404 });
     },
   });
+  return server;
 }

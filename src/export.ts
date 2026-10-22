@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer-core";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "./server.ts";
 import { audible } from "../ui/canvas/stage.js";
@@ -14,12 +14,15 @@ const CHROMES = [
   "/usr/bin/chromium",
 ];
 
-// scene: one scene folder (e.g. "001-hook") with the global tracks under it; else the whole video
-export async function exportVideo(dir: string, out: string, scene?: string) {
+// scene: one scene folder (e.g. "001-hook") with the global tracks under it; else the whole video.
+// From the editor: port = its running server (no second one), onFrame = progress, signal = cancel
+// (the half-written file is then deleted).
+type Opts = { port?: number; onFrame?: (i: number, n: number) => void; signal?: AbortSignal };
+export async function exportVideo(dir: string, out: string, scene?: string, { port, onFrame, signal }: Opts = {}) {
   const exe = CHROMES.find((p) => p && existsSync(p));
   if (!exe) throw new Error("Chrome not found. Set CHROME_PATH.");
 
-  const server = serve(dir, 0);
+  const server = port ? { port, stop() {} } : serve(dir, 0);
   const project = await (await fetch(`http://localhost:${server.port}/api/project`)).json();
   if (scene && !project.scenes?.some((s: any) => s.slug === scene)) {
     server.stop(true);
@@ -59,24 +62,29 @@ export async function exportVideo(dir: string, out: string, scene?: string) {
 
   const ff = Bun.spawn(["ffmpeg", ...args], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
   const ffErr = new Response(ff.stderr).text();
-  const browser = await puppeteer.launch({ executablePath: exe, headless: true });
+  let ok = false, browser;
   try {
+    browser = await puppeteer.launch({ executablePath: exe, headless: true });
     const page = await browser.newPage();
     await page.setViewport({ width: tl.width, height: tl.height });
     await page.goto(`http://localhost:${server.port}/render`);
     await page.evaluate((t) => (globalThis as any).__init(t), tl);
     const frames = Math.round(total * tl.fps);
     for (let i = 0; i < frames; i++) {
+      if (signal?.aborted) throw new Error("Export cancelled.");
       await page.evaluate((t) => (globalThis as any).__frame(t), t0 + i / tl.fps);
       ff.stdin.write(await page.screenshot({ type: "png" }));
       await ff.stdin.flush();
-      process.stdout.write(`\rframe ${i + 1}/${frames}`);
+      if (onFrame) onFrame(i + 1, frames);
+      else process.stdout.write(`\rframe ${i + 1}/${frames}`);
     }
     ff.stdin.end();
     if (await ff.exited) throw new Error("\n" + (await ffErr));
+    ok = true;
     console.log(`\nwrote ${out}`);
   } finally {
-    await browser.close();
+    await browser?.close();
     server.stop(true);
+    if (!ok) { ff.kill(); await ff.exited; rmSync(out, { force: true }); } // never leave a broken half file
   }
 }

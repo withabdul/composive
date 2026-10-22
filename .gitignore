@@ -11,3 +11,5 @@ projects/*
 !projects/example/
 # deleted media (the editor moves files here)
 .trash/
+# exported videos (the editor Export button)
+exports/

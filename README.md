@@ -14,6 +14,13 @@ Without a project (`composive dev`), a menu lists `projects/` (last edited first
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
 `example` is a small demo.
 
+## Export from the editor
+
+The `Export` button (top bar) asks what to export (the whole video, with the in/out range if set, or one scene
+with the global tracks under it) and a file name. The server renders it into `<project>/exports/<name>.mp4`
+(needs ffmpeg and Chrome, like the CLI). While it runs, the progress shows next to the button and the button
+cancels it (the half-written file is deleted). One export at a time; `exports/` is not shown in Media.
+
 ## Import media
 
 Files are copied into `<project>/media` and appended to the end of the matching track, sorted by file name.
@@ -30,6 +37,7 @@ Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes beco
 
 ```
 app.js            startup, shortcuts, live reload
+export.js         Export button: dialog, progress, cancel (renders on the server into exports/)
 core/             state.js shared state and helpers, history.js undo stacks (one per scene),
                   edit.js every timeline change plus undo/redo and save,
                   project.js scenes <-> one timeline (shared with export)
