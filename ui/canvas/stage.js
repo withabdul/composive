@@ -7,9 +7,9 @@ export const kind = (src) =>
   : /\.(mp3|wav|m4a|ogg)$/i.test(src) ? "audio"
   : "image";
 
+let n = 0; // module wide: clips of two scene files read in the same ms must not get the same id
 export function normalize(tl) {
   tl.fps ??= 30; tl.width ??= 1920; tl.height ??= 1080; tl.tracks ??= [];
-  let n = 0;
   for (const tr of tl.tracks) {
     tr.type ??= "video"; tr.clips ??= [];
     for (const c of tr.clips) c.id ??= `c${Date.now().toString(36)}${n++}`;

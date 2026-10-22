@@ -6,12 +6,13 @@ Minimal video editor: HTML scenes + `timeline.json`. An AI edits the files, the 
 bun install
 bun bin/composive.ts dev example            # editor at http://localhost:9999, live-reloads on file change
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
+bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
 ```
 
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
-`example` is a small demo, `video-ai-15min` a long test (45 scenes of 20 s, text, video, 15 min voice track).
+`example` is a small demo.
 
 ## Import media
 
@@ -21,6 +22,7 @@ Files are copied into `<project>/media` and appended to the end of the matching 
   Each file shows its upload progress there; a failed or unsupported file stays listed with the reason (click to hide).
   The Media tab lists files as a grid (thumbnail, type, duration) with search and a type filter; `+` or double-click adds one.
 - CLI: `bun bin/composive.ts import <folder> -p <project-dir>` (reads durations with `ffprobe`; works while `dev` runs).
+  The CLI adds the files to the global tracks (the editor adds them to the scene shown).
 
 Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes become `name-1.ext`.
 
@@ -28,8 +30,9 @@ Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes beco
 
 ```
 app.js            startup, shortcuts, live reload
-core/             state.js shared state and helpers, history.js undo stacks,
-                  edit.js every timeline change plus undo/redo
+core/             state.js shared state and helpers, history.js undo stacks (one per scene),
+                  edit.js every timeline change plus undo/redo and save,
+                  project.js scenes <-> one timeline (shared with export)
 canvas/           stage.js frame renderer shared with export, viewer.js transport and ui(),
                   gizmo.js selection box, move/scale/rotate and snap guides in the viewer
 timeline/         timeline.js drawing and pointer tools, audio.js playback and meter
@@ -43,14 +46,30 @@ index.html, render.html (export page), style.css
 
 ```
 my-project/
-  timeline.json
-  scenes/<name>/index.html     # one folder per scene
-  voice.mp3, clip.mp4, ...     # any media, referenced by path relative to the project
+  timeline.json                         # fps, size, range, global tracks (ids start with G: GA1 = music)
+  scenes/001-hook/timeline.json         # this scene's tracks, times from 0
+  scenes/001-hook/<clip>/index.html     # an HTML clip of this scene
+  scenes/002-body/...
+  media/voice.mp3, clip.mp4, ...        # any media, referenced by path relative to the project
 ```
 
-## Scene contract
+A video is a row of scenes. A scene folder name must be `###-slug` (e.g. `001-hook`); other folders in
+`scenes/` are skipped with a warning. The number sets the order. A scene starts where the scene before it
+ends (the end of its last clip), so a longer scene moves the scenes after it. Global tracks (music, a voice
+over the whole video) are in video time and do not move with the scenes.
 
-A scene is an HTML page that draws itself as a pure function of time:
+Editor: the top bar list switches the scene shown; `+ Scene` makes the next folder (`003-<name>`).
+- A scene view shows its tracks on top and the global tracks below a blue line, all in video time (the
+  ruler shows video time; the time outside the scene is dimmed). Both can be edited. A scene clip cannot start
+  before its scene. `G` on a track header moves the track between this scene and the global tracks.
+- `All scenes` shows the whole video: every scene's tracks read-only (named `001-hook/V1`), the global
+  tracks editable. New tracks there are global.
+- The Scenes tab lists the HTML clips of the scene shown. Undo history is kept per scene; it is cleared when
+  the global tracks or the scene start changed while another scene was shown.
+
+## Clip contract
+
+An HTML clip is an HTML page that draws itself as a pure function of time:
 
 ```html
 <meta name="duration" content="4">   <!-- default length when added to the timeline -->
@@ -89,11 +108,18 @@ track, the solid on the bottom one.
 
 ## timeline.json
 
+`timeline.json` (global) and `scenes/<slug>/timeline.json` (a scene: only `tracks` and `markers`) use the same
+track and clip format:
+
 ```json
 { "fps": 30, "width": 1920, "height": 1080,
   "tracks": [
-    { "id": "V2", "type": "video", "clips": [{ "src": "scenes/x/index.html", "start": 1, "duration": 3 }] },
-    { "id": "A1", "type": "audio", "clips": [{ "src": "vo.mp3", "start": 0, "duration": 5, "offset": 0, "fadeIn": 0.5, "fadeOut": 1, "volume": 1 }] }
+    { "id": "GA1", "type": "audio", "clips": [{ "src": "media/vo.mp3", "start": 0, "duration": 5, "offset": 0, "fadeIn": 0.5, "fadeOut": 1, "volume": 1 }] }
+  ] }
+```
+```json
+{ "tracks": [
+    { "id": "V1", "type": "video", "clips": [{ "src": "scenes/001-hook/title/index.html", "start": 1, "duration": 3 }] }
   ] }
 ```
 
@@ -145,7 +171,7 @@ Timeline:
   move, trim, split and delete together; hold `Alt` to act on one only. `Ctrl+L` links the selection or
   unlinks it. In `timeline.json` linked clips share a `link` id; a clip on an audio track always plays as
   audio, also when its `src` is a video file.
-- `I` / `O` set the export range in / out at the playhead (blue band in the ruler, stored as `timeline.range`);
+- `I` / `O` set the export range in / out at the playhead (blue band in the ruler, stored in video time as `range` in the global `timeline.json`);
   `Alt+X` clears it. The export renders only that range, and playback started before the out marker stops there.
 `Ctrl+Z` undo, `Ctrl+Shift+Z` or `Ctrl+Y` redo (100 steps; one drag is one step; an outside edit of `timeline.json` is undoable too).
 
@@ -176,3 +202,5 @@ selected clip 1 px (`Shift` = 10 px); after a click in the timeline they step fr
   waveform and playback, so very large videos load slowly.
 - Export renders PNG frames through Chrome, so it is slow for long timelines.
 - Undo history lives in the browser tab and is lost on reload; keep `timeline.json` in git.
+- Global video tracks (e.g. a logo) are always below the scene tracks (under them in the frame).
+- Solo on one audio track mutes every other audio track of the whole video, also in other scenes.

@@ -55,9 +55,14 @@ Decisions already made:
       ◆ marks on timeline clips (click, drag, delete); `Shift+K` / `Ctrl+Shift+K`; preview and export share
       `propsAt()` in stage.js.
 
+- [x] Scenes: `scenes/###-slug/` with its own `timeline.json` and HTML clips (`<clip>/index.html`); the top bar
+      switches scenes, `+ Scene` makes one; global tracks (`G` ids) in the root `timeline.json` under every scene;
+      "All scenes" view; undo per scene; `export --scene`. `example` moved, `video-ai-15min` removed.
+
 ## Now
 
-- [ ] Nothing planned. Ideas: keyframes for audio volume; a graph (curve) editor; keyframes on several clips at once.
+- [ ] Scenes: test in the browser (switch, edit global from a scene, undo per scene, `+ Scene`, export both ways).
+- [ ] Nothing else planned. Ideas: keyframes for audio volume; a graph (curve) editor; keyframes on several clips at once.
 
 ## Timeline leftovers
 

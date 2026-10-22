@@ -1,11 +1,16 @@
 // Timeline: drawing (ruler, range, rows, clips, waveform, filmstrip, fades) and pointer interaction for the four tools.
 import { $, S, bus, redraw, el, clamp, kind, clipKind, DRAG_SRC, clips, findClip, trackOf, locked, withLinked, isSel, selIds, selected, setSel, snap, totalDur, stage, LABEL, ROW, MIN, EPS } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt } from "../core/edit.js";
+import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, toggleGlobal, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt } from "../core/edit.js";
+import { isGlobal } from "../core/project.js";
 import { seek, ui } from "../canvas/viewer.js";
 import { strip, FRAME_H } from "./filmstrip.js";
 
 const sc = $("#tlscroll"), inner = $("#tlinner"), snapLine = $("#snapline"), marquee = $("#marquee");
+const shade = [el("div", "outside"), el("div", "outside")]; // dims the time before and after the scene shown
+inner.append(...shade);
+// earliest start of a clip: a scene clip stays inside its scene
+const floor = (c) => (S.scene && !isGlobal(trackOf(c)) ? S.win.a : 0);
 
 bus.addEventListener("redraw", () => drawTimeline());
 let scrollFrame = 0; // only the visible part is drawn, so scrolling draws again (once per frame)
@@ -66,14 +71,22 @@ function drawTimeline() {
     ruler.append(band);
   }
 
+  shade[0].hidden = shade[1].hidden = !S.scene;
+  shade[0].style.left = LABEL + "px";
+  shade[0].style.width = S.win.a * S.pps + "px";
+  shade[1].style.left = LABEL + S.win.b * S.pps + "px";
+  shade[1].style.width = Math.max(0, dur - S.win.b) * S.pps + "px";
+
   const rows = $("#rows");
   rows.innerHTML = "";
   const solo = S.tl.tracks.some((t) => t.type === "audio" && t.solo);
+  const firstGlobal = S.tl.tracks.find(isGlobal);
   for (const tr of S.tl.tracks) {
     // "off" = not seen or heard: a hidden video track, a muted audio track, or one left out by solo
     const off = tr.type === "audio" ? (solo ? !tr.solo : tr.mute) : tr.hide;
     const dragging = S.drag?.type === "track" && S.drag.id === tr.id; // kept while reorder redraws the rows
-    const row = el("div", `row ${tr.type}` + (off ? " off" : "") + (tr.lock ? " locked" : "") + (dragging ? " dragging" : ""));
+    const row = el("div", `row ${tr.type}` + (off ? " off" : "") + (tr.lock ? " locked" : "") + (dragging ? " dragging" : "")
+      + (tr === firstGlobal && tr !== S.tl.tracks[0] ? " gstart" : ""));
     row.dataset.track = tr.id;
     row.style.height = ROW[tr.type] + "px";
     row.append(header(tr));
@@ -95,14 +108,20 @@ const ICON = {
 // Track header: name (double-click to rename), flag buttons, delete; drag it up or down to reorder.
 function header(tr) {
   const h = el("div", "label");
+  if (tr.ro) { // all scenes: a scene's track, shown only (edit it in its scene)
+    h.title = "Scene track. Pick the scene in the top bar to edit it.";
+    h.append(el("span", "tname", tr.name ? `${tr.id.split("/")[0]}/${tr.name}` : tr.id));
+    return h;
+  }
   h.dataset.track = tr.id;
   h.title = "Drag to reorder. Double-click the name to rename.";
   const btns = el("div", "tbtns");
   const keys = tr.type === "audio"
     ? [["mute", "M", "Mute"], ["solo", "S", "Solo: hear only solo tracks"], ["lock", ICON.lock, "Lock: no edits"]]
     : [["hide", ICON.hide, "Hide: not in preview or export"], ["lock", ICON.lock, "Lock: no edits"]];
+  if (S.scene) keys.push(["global", "G", "Global: on for the whole video (e.g. music). Off: only in this scene"]);
   for (const [key, html, tip] of [...keys, ["del", "×", "Delete track and its clips"]]) {
-    const b = el("button", (tr[key] ? "on " : "") + key);
+    const b = el("button", ((key === "global" ? isGlobal(tr) : tr[key]) ? "on " : "") + key);
     b.innerHTML = html;
     b.title = tip;
     b.dataset.act = key;
@@ -372,7 +391,7 @@ sc.addEventListener("pointermove", (e) => {
       if (k && !idx.some((i) => ts[i + k].lock)) same.forEach((g, n) => moveTrack(g.c, ts[idx[n] + k].id));
     }
     const want = magnet(d, group.flatMap((g) => [g.o.start, g.o.start + g.o.duration]), dt, o.start, e);
-    const lo = -Math.min(...group.map((g) => g.o.start)); // nothing goes before 0
+    const lo = Math.max(...group.map((g) => floor(g.c) - g.o.start)); // nothing goes before 0, a scene clip not before its scene
     // magnet: a clip that left its track leaves no gap there, the clips after it close up
     // (not within the same track: those clips would close up into the moved clip itself)
     if (ripple) {
@@ -400,7 +419,7 @@ sc.addEventListener("pointermove", (e) => {
       }
     } else {
       // not before the source start, nor (unless overwrite) into the clip before
-      const lo = Math.max(...all.map((x) => Math.max(-(x.offset || 0), over ? -x.start : neighbors(x).prev - x.start)));
+      const lo = Math.max(...all.map((x) => Math.max(-(x.offset || 0), over ? floor(x) - x.start : Math.max(floor(x), neighbors(x).prev) - x.start)));
       const delta = clamp(magnet(d, [o.start], dt, o.start, e), lo, hi);
       for (const x of all) { x.start += delta; x.offset = (x.offset || 0) + delta; x.duration -= delta; }
       if (over) carve(all);
@@ -570,6 +589,7 @@ $("#tl").addEventListener("click", (e) => {
   if (!b) return;
   const a = b.dataset.act, id = b.closest(".label")?.dataset.track;
   if (a.startsWith("add-")) addTrack(a.slice(4));
+  else if (a === "global") toggleGlobal(id);
   else if (a === "del") {
     const tr = S.tl.tracks.find((t) => t.id === id), n = tr?.clips.length ?? 0;
     if (!n) return deleteTrack(id);
@@ -581,7 +601,7 @@ $("#tl").addEventListener("click", (e) => {
 
 $("#rows").addEventListener("dblclick", (e) => {
   const name = e.target.closest(".tname");
-  if (!name) return;
+  if (!name?.closest(".label").dataset.track) return; // a read-only scene track has no rename
   const id = name.closest(".label").dataset.track, tr = S.tl.tracks.find((t) => t.id === id);
   const input = el("input", "tedit");
   input.value = tr.name || tr.id;
@@ -610,9 +630,11 @@ function setZoom(v) {
   $("#zoom").value = S.pps;
   drawTimeline();
 }
+// fits the scene shown (or the whole video) into the view
 export function zoomFit() {
-  setZoom((sc.clientWidth - LABEL - 24) / Math.max(1, totalDur()));
-  sc.scrollLeft = 0;
+  const { a, b } = S.scene ? S.win : { a: 0, b: totalDur() };
+  setZoom((sc.clientWidth - LABEL - 24) / Math.max(1, b - a));
+  sc.scrollLeft = a * S.pps;
 }
 $("#zoom").addEventListener("input", (e) => setZoom(Number(e.target.value)));
 $("#zoom").addEventListener("change", (e) => e.target.blur()); // a focused slider would swallow shortcuts

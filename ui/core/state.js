@@ -27,13 +27,15 @@ export function toast(text) {
 export const uid = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 export const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
 
-export const LABEL = 104; // width of the track header column, px (same as --label in style.css)
+export const LABEL = 124; // width of the track header column, px (same as --label in style.css)
 export const ROW = { video: 52, audio: 68 }; // track heights, px
 export const MIN = 0.1; // shortest clip, seconds
 export const DRAG_SRC = "application/x-composive-src"; // drag data: a scene or media path from the sidebar
 
 export const S = {
   tl: null, project: null,
+  // scene shown (its slug), or "" for all scenes; win = its time window { a, b } in video time
+  scene: "", win: { a: 0, b: 0 },
   t: 0, playing: false, tool: "view", pps: 80,
   // Selection: `sel` is the main clip (panel, canvas); `extra` holds the other selected clips.
   // Setting `sel` clears `extra`, so plain code that selects one clip needs no change.

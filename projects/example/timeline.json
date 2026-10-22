@@ -4,36 +4,7 @@
   "height": 1080,
   "tracks": [
     {
-      "id": "V2",
-      "type": "video",
-      "clips": []
-    },
-    {
-      "id": "V1",
-      "type": "video",
-      "clips": [
-        {
-          "id": "cmvjhm4tyqay",
-          "src": "scenes/intro/index.html",
-          "start": 0,
-          "duration": 4
-        },
-        {
-          "id": "cmvjmpfatnh6",
-          "src": "media/reja.jpg",
-          "start": 4,
-          "duration": 3,
-          "props": {
-            "x": 0.5,
-            "y": 0.6495,
-            "scale": 0.3507,
-            "rotation": -3.5
-          }
-        }
-      ]
-    },
-    {
-      "id": "A1",
+      "id": "GA1",
       "type": "audio",
       "clips": [
         {

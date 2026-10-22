@@ -1,6 +1,6 @@
 :root {
   --bg: #121316; --panel: #1a1c21; --line: #2a2d34; --text: #d7dae0; --dim: #868b96;
-  --label: 104px; /* track header width, same as LABEL in core/state.js */
+  --label: 124px; /* track header width, same as LABEL in core/state.js */
   --accent: #5b9dff; --scene: #3b6fd4; --video: #8a5bd4; --image: #2f9d8f; --audio: #2f9d57;
 }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #3a3f48 transparent; } /* dark, thin scrollbars */
@@ -148,6 +148,10 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 .row.droptarget { background: rgba(91,157,255,.15); } /* a sidebar tile is dragged over this track */.row.dragging .label { background: #22304a; color: var(--text); }
 .tbtns button { cursor: pointer; }
 .row.filler .label { cursor: default; }
+/* scene view: time outside the scene shown is dimmed; the global tracks start below a line */
+.outside { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.35); pointer-events: none; z-index: 9; }
+.row.gstart { border-top: 2px solid var(--accent); }
+#scenes:empty::after { content: attr(data-empty); color: var(--dim); font-size: 12px; }
 .tname { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .tedit { width: 100%; padding: 0 3px; font-size: 12px; background: var(--bg); border: 1px solid var(--accent); border-radius: 3px; }
 .tbtns { display: flex; gap: 3px; }
