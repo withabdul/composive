@@ -3,7 +3,7 @@
 <!-- Built-in shape ("@shape"). x, y = center and w, h = size, as fractions of the frame.
      round: 0 = rectangle, 1 = ellipse. The viewer can drag x and y. -->
 <meta name="duration" content="3">
-<meta name="props" content='{"color":"#5b9dff","w":0.3,"h":0.3,"round":0,"opacity":1,"x":0.5,"y":0.5}'>
+<meta name="props" content='{"color":"#5b9dff","w":0.3,"h":0.3,"round":0,"opacity":1,"x":0.5,"y":0.5,"scale":1,"rotation":0}'>
 <style>
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
   #s { position: absolute; transform: translate(-50%, -50%); }
@@ -11,10 +11,18 @@
 <div id="s"></div>
 <script>
   const s = document.getElementById("s");
+  let last;
   window.seek = (_time, _duration, p) => {
+    last = p;
     Object.assign(s.style, {
       left: p.x * 100 + "%", top: p.y * 100 + "%", width: p.w * 100 + "%", height: p.h * 100 + "%",
       borderRadius: Math.max(0, Math.min(1, p.round)) * 50 + "%", background: p.color, opacity: p.opacity,
+      transform: `translate(-50%, -50%) rotate(${p.rotation}deg) scale(${p.scale})`,
     });
+  };
+  // the rotated box for the viewer's selection frame, in frame pixels
+  window.box = () => last && {
+    cx: last.x * innerWidth, cy: last.y * innerHeight,
+    w: last.w * innerWidth * last.scale, h: last.h * innerHeight * last.scale, rot: last.rotation,
   };
 </script>

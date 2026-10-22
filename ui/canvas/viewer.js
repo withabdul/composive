@@ -1,5 +1,5 @@
 // Viewer + transport: stage scaling, play/pause/seek, and the ui() refresh of everything time-dependent.
-import { $, S, stage, fmt, clips, totalDur, kind, LABEL } from "../core/state.js";
+import { $, S, bus, stage, fmt, clips, totalDur, kind, LABEL } from "../core/state.js";
 import { H } from "../core/history.js";
 import { actx, startAudio, stopAudio, drawMeter, resetMeter } from "../timeline/audio.js";
 import { drawBox } from "./gizmo.js";
@@ -25,8 +25,8 @@ export function ui() {
   $("#tlscroll").dataset.tool = S.tool;
   $("#magnet").classList.toggle("on", S.magnet);
   $("#overwrite").classList.toggle("on", S.overwrite);
-  $("#fit").classList.toggle("focus", S.focus === "canvas");
   requestAnimationFrame(drawBox); // after the scenes have drawn this frame
+  bus.dispatchEvent(new Event("time")); // the panel shows values at the playhead
 
   // the topmost scene under the playhead is "the open scene" (tracks are ordered top first)
   const open = clips().find((c) => kind(c.src) === "scene" && S.t >= c.start && S.t < c.start + c.duration);

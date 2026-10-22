@@ -10,6 +10,20 @@ export const el = (tag, cls, text) => {
   return e;
 };
 export const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Short message in the bottom-right corner, gone after 1.5 s. A new message replaces the one shown.
+let toastEl, toastTimer;
+export function toast(text) {
+  if (!toastEl) {
+    toastEl = el("div", "toast");
+    toastEl.setAttribute("role", "status"); // screen readers read it out
+    document.body.append(toastEl);
+  }
+  toastEl.textContent = text;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
+}
 export const uid = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 export const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
 

@@ -101,8 +101,13 @@ track, the solid on the bottom one.
 - `offset`: seconds skipped at the start of the source. For a scene it is added to `t` passed to `seek`.
 - `total`: set by split, so a scene keeps receiving its original `duration` after being cut.
 - Clip `id` is optional; the editor adds one.
+- `keys`: keyframes, `{ "x": [{ "t": 0, "v": 0.2 }, { "t": 2, "v": 0.8, "ease": "out" }] }`. `t` is clip-local time
+  (the time a scene's `seek` gets, `offset` included), so keys stay on the content when the clip moves, is trimmed
+  or split. Numbers and `#rrggbb` colors blend between keys; `ease` (from that key to the next): `linear`
+  (default), `in`, `out`, `inout`, `hold`. Before the first key and after the last, their value holds.
 - Video and image clips have `props` too: `x`, `y` (center, fractions of the frame, default 0.5), `scale` (1),
-  `rotation` (degrees, 0), `opacity` (0..1, 1). Preview and export both apply them.
+  `sx`, `sy` (stretch width / height on top of scale, 1), `rotation` (degrees, 0), `opacity` (0..1, 1).
+  Preview and export both apply them.
 
 ## Editor
 
@@ -112,6 +117,8 @@ Split `S` (click a clip to split at that point). `Ctrl+wheel` zooms, `\` zooms t
 Timeline:
 - Click the ruler to seek. Click an empty track area to seek and deselect; drag there to box-select.
   `Shift`+click adds or removes a clip; dragging one selected clip moves the whole selection.
+  Up or down, the selection moves by the same number of tracks as the held clip (a linked sound moves over
+  audio tracks); it stops at the first or last track and does not go onto a locked track.
 - Moves and trims snap to the playhead and to clip edges (yellow line); hold `Alt` to snap to frames only.
 - Overwrite `W` (toolbar toggle), off: clips never overlap on a track. A clip moved (or dropped from the
   sidebar) onto a used spot goes to a new track next to it (above for video, below for audio); trims stop at
@@ -142,13 +149,24 @@ Timeline:
   `Alt+X` clears it. The export renders only that range, and playback started before the out marker stops there.
 `Ctrl+Z` undo, `Ctrl+Shift+Z` or `Ctrl+Y` redo (100 steps; one drag is one step; an outside edit of `timeline.json` is undoable too).
 
+Keyframes: in the right panel, `◆` next to a number or color prop adds a keyframe at the playhead (filled =
+a key here, yellow outline = the prop is animated; click a filled one to remove it). Once a prop has keys, a
+change at the playhead (panel field, label drag, canvas move/scale/rotate, arrow keys) sets or adds the key
+there. On a key, a menu sets its easing. On the timeline, `◆` marks show key times on the clip: click to go
+there, drag to move them, `Alt`+click or right-click to delete. `Shift+K` / `Ctrl+Shift+K` go to the next /
+previous keyframe of the selected clips (or of all clips).
+
 Right panel: drag a number field's label left or right to change it (`Shift` faster, `Alt` finer). With
 several clips selected, an edit applies to all of them (`start` moves them all by the same amount); props show
 when every selected clip has them. The Track section renames the main clip's track and sets mute, solo, hide
 and lock. The trash button in the timeline toolbar removes empty tracks.
 
-Canvas: click a clip in the viewer to select it (a blue box shows it), drag to move. Corner handles scale and the
-round handle rotates (`Shift` = 15° steps). Moves snap to the frame center and edges (pink guide); hold `Alt` to
+Canvas: click a clip in the viewer to select it (a blue box shows it), drag to move. Corner handles scale, side
+handles stretch the width or height (shape `w`/`h`, video/image `sx`/`sy`), and the round handle rotates
+(`Shift` = 15° steps). A resize keeps the opposite corner or side in place: hold `Alt` to resize from the
+center, `Shift` on a side handle to keep the ratio. Double-click text in a scene (`@text`, the `@lower`
+title and sub, or any scene text that shows a string prop as is) to edit it on the canvas: `Enter` or a click
+outside saves, `Shift+Enter` adds a line, `Esc` cancels. Moves snap to the frame center and edges (pink guide); hold `Alt` to
 not snap. Click empty space or press `Esc` to deselect. After a click in the viewer, the arrow keys move the
 selected clip 1 px (`Shift` = 10 px); after a click in the timeline they step frames.
 

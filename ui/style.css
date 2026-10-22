@@ -7,7 +7,8 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
 body { display: grid; grid-template: 40px 1fr 300px / 220px 1fr; }
 body.panel { grid-template-columns: 220px 1fr 260px; }
-button, select, input { font: inherit; color: inherit; }
+:root { color-scheme: dark; } /* native controls (select lists, number spinners, sliders) follow the dark theme */
+button, select, input, textarea { font: inherit; color: inherit; }
 button { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
 button:hover { border-color: var(--dim); }
 button:disabled { opacity: .4; cursor: default; }
@@ -66,12 +67,14 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 #fit { flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; background: #0b0c0e; }
 #stage { position: relative; overflow: hidden; background: #000; transform-origin: 0 0; }
 #overlay { position: absolute; inset: 0; z-index: 9999; } /* catches pointer events that iframes would swallow */
-#fit.focus { box-shadow: inset 0 0 0 1px var(--accent); }
 /* --inv = 1 / stage scale, so these keep their size on screen */
-#selbox { position: absolute; outline: calc(1.5px * var(--inv, 1)) solid var(--accent); pointer-events: none; }
+/* inner white line: the box stays visible on content that has the accent color */
+#selbox { position: absolute; outline: calc(1.5px * var(--inv, 1)) solid var(--accent); box-shadow: inset 0 0 0 calc(1px * var(--inv, 1)) #fff; pointer-events: none; }
 #selbox[hidden] { display: none; }
 #selbox i { position: absolute; display: none; width: calc(10px * var(--inv, 1)); height: calc(10px * var(--inv, 1)); margin: calc(-5px * var(--inv, 1)); background: #fff; border: calc(1px * var(--inv, 1)) solid var(--accent); pointer-events: auto; }
-#selbox.scalable i[data-h="scale"], #selbox.rotatable i[data-h="rot"] { display: block; }
+#selbox.scalable i[data-h="scale"], #selbox.rotatable i[data-h="rot"], #selbox.stretchy i[data-h="side"] { display: block; }
+#selbox .l { left: 0; top: 50%; cursor: ew-resize; } #selbox .r { left: 100%; top: 50%; cursor: ew-resize; }
+#selbox .t { left: 50%; top: 0; cursor: ns-resize; } #selbox .b { left: 50%; top: 100%; cursor: ns-resize; }
 #selbox .tl { left: 0; top: 0; cursor: nwse-resize; } #selbox .br { left: 100%; top: 100%; cursor: nwse-resize; }
 #selbox .tr { left: 100%; top: 0; cursor: nesw-resize; } #selbox .bl { left: 0; top: 100%; cursor: nesw-resize; }
 #selbox .rot { left: 50%; top: calc(-24px * var(--inv, 1)); border-radius: 50%; cursor: grab; }
@@ -87,7 +90,15 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 .pg { padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .pg h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
 .pa { display: flex; gap: 6px; flex-wrap: wrap; }
-.pf { display: grid; grid-template-columns: 64px 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
+.pf { display: grid; grid-template-columns: 64px 1fr auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+.pf.sl { grid-template-columns: 64px 1fr 56px auto auto; } /* label, slider, number box, keyframe buttons */
+.pf.sl input[type="range"] { width: 100%; min-width: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
+/* keyframe button: dim = not animated, outlined = animated, filled = a key at the playhead */
+.kfb { padding: 0 5px; font-size: 11px; line-height: 20px; color: var(--dim); background: none; }
+.kfb.has { color: #ffd23f; }
+.kfb.on { color: #111; background: #ffd23f; border-color: #ffd23f; }
+.kfe { max-width: 74px; padding: 1px 2px; font-size: 11px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.kfe[hidden] { display: none; }
 .pf span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
 .pf span.scrub { cursor: ew-resize; user-select: none; } /* drag to change the number */
 .pf span.scrub:hover { color: var(--text); }
@@ -157,12 +168,26 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 .clip canvas { position: absolute; inset: 0; pointer-events: none; }
 .edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 3; }
 .edge.l { left: 0; } .edge.r { right: 0; }
+.kf { position: absolute; bottom: 3px; z-index: 4; width: 9px; height: 9px; margin-left: -4.5px; background: #ffd23f; border: 1px solid #111; transform: rotate(45deg); cursor: ew-resize; } /* keyframe ◆ */
 .fh { position: absolute; top: 2px; width: 10px; height: 10px; margin-left: -5px; background: #fff; border-radius: 50%; cursor: ew-resize; z-index: 4; }
 .fh.out { margin-left: 0; margin-right: -5px; }
 /* marker: a pin on the ruler (--c = its color), with its name next to it */
 .mk { position: absolute; top: 0; z-index: 2; width: 10px; height: 100%; margin-left: -5px; cursor: grab; }
 .mk::before { content: ""; position: absolute; left: 0; top: 0; width: 10px; height: 14px; background: var(--c); clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); }
 .mk span { position: absolute; left: 12px; top: 1px; font-size: 10px; font-style: normal; color: var(--c); white-space: nowrap; pointer-events: none; }
+.toast { position: fixed; right: 16px; bottom: 16px; z-index: 200; padding: 8px 14px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity .15s, transform .15s; }
+.toast.show { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+.modal { padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.modal::backdrop { background: rgba(0,0,0,.55); }
+.modal > div { width: min(360px, calc(100vw - 32px)); padding: 16px; } /* padding inside, so a click on the dialog itself = outside */
+.modal h3 { margin: 0 0 8px; font-size: 15px; }
+.modal p { margin: 0 0 16px; color: var(--dim); line-height: 1.4; }
+.mbtns { display: flex; justify-content: flex-end; gap: 8px; }
+.mbtns button { padding: 5px 14px; }
+.mbtns button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mbtns .danger { color: #fff; background: #d64545; border-color: #d64545; }
+.mbtns .danger:hover { background: #e05555; border-color: #e05555; }
 .mkpop { position: fixed; z-index: 100; display: flex; gap: 6px; align-items: center; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 .mkpop input:not([type="color"]) { width: 160px; padding: 3px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
 .mkpop input[type="color"] { width: 28px; height: 24px; padding: 0; border: 0; background: none; }

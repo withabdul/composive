@@ -1,5 +1,5 @@
 // All timeline mutations. Every change ends in commit(): re-sort, re-render, repaint, save.
-import { S, stage, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap } from "./state.js";
+import { S, stage, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast } from "./state.js";
 import { H, record } from "./history.js";
 import { loadAudio, startAudio } from "../timeline/audio.js";
 
@@ -34,6 +34,7 @@ export function splitClip(c, ts, linked = true) {
   for (const x of cs) {
     const b = { ...x, id: uid(), start: ts, duration: x.start + x.duration - ts, offset: (x.offset || 0) + ts - x.start, fadeIn: 0 };
     if (link) b.link = link; else delete b.link; // a half split alone is not linked to the other's sound
+    if (x.keys) b.keys = structuredClone(x.keys); // each half gets its own keys (same times: they use content time)
     b.total = x.total ?? x.duration; // scene keeps its original length so motion continues across the split
     x.total = b.total;
     x.duration = ts - x.start;
@@ -227,6 +228,60 @@ export function duplicate(cs) {
 }
 export const duplicateClip = (c) => duplicate(withLinked([c]));
 
+/* ---------- keyframes (clip.keys, see canvas/stage.js) ---------- */
+
+// clip-local time of timeline time t (the time keyframes use), on a whole frame
+export const localAt = (c, t = S.t) => snap(t) - c.start + (c.offset || 0);
+const keyAt = (ks, lt) => ks?.find((k) => Math.abs(k.t - lt) < EPS);
+
+// Writes a prop at the playhead: into its keyframes when it has some (auto-key: a key there is
+// changed or added), else as the clip's fixed value. The caller commits.
+export function setProp(c, key, v) {
+  if (typeof v === "number" && !Number.isFinite(v)) return; // NaN would be saved as null (e.g. resize of a 0-size box)
+  const ks = c.keys?.[key];
+  if (!ks?.length) { c.props = { ...c.props, [key]: v }; return; }
+  const lt = localAt(c), k = keyAt(ks, lt);
+  if (k) k.v = v;
+  else { ks.push({ t: lt, v }); ks.sort((a, b) => a.t - b.t); }
+}
+
+// ◆ in the panel: add a key at the playhead with the value seen now, or remove the key there.
+// Removing the last key keeps its value as the clip's fixed value.
+export function toggleKey(c, key, now) {
+  record();
+  const lt = localAt(c), ks = ((c.keys ??= {})[key] ??= []), k = keyAt(ks, lt);
+  if (!k) { ks.push({ t: lt, v: now }); ks.sort((a, b) => a.t - b.t); }
+  else {
+    ks.splice(ks.indexOf(k), 1);
+    if (!ks.length) {
+      delete c.keys[key];
+      c.props = { ...c.props, [key]: k.v };
+    }
+  }
+  if (!Object.keys(c.keys).length) delete c.keys;
+  commit();
+}
+
+export function setEase(c, key, ease) {
+  const k = keyAt(c.keys?.[key], localAt(c));
+  if (!k || (k.ease ?? "linear") === ease) return;
+  record();
+  if (ease === "linear") delete k.ease; else k.ease = ease;
+  commit();
+}
+
+// all keys of a clip at clip-local time lt (a ◆ on the timeline)
+export function removeKeysAt(c, lt) {
+  record();
+  for (const [key, ks] of Object.entries(c.keys ?? {})) {
+    const left = ks.filter((k) => Math.abs(k.t - lt) >= EPS);
+    if (left.length) c.keys[key] = left;
+    else { c.props = { ...c.props, [key]: ks.find((k) => Math.abs(k.t - lt) < EPS).v }; delete c.keys[key]; }
+  }
+  if (c.keys && !Object.keys(c.keys).length) delete c.keys;
+  commit();
+}
+
 /* ---------- markers ---------- */
 
 // Markers (`timeline.markers`: { id, t, name?, color? }) are named points in time on the ruler.
@@ -365,12 +420,14 @@ export function removeEmptyTracks() {
   commit();
 }
 
-function step(from, to) {
-  if (!from.length || S.drag) return;
+function step(from, to, name) {
+  if (S.drag) return;
+  if (!from.length) return toast(`Nothing to ${name.toLowerCase()}`);
   to.push(JSON.stringify(S.tl));
   S.tl = JSON.parse(from.pop());
   if (!findClip(S.sel)) S.sel = null;
   commit();
+  toast(name);
 }
-export const undo = () => step(H.undo, H.redo);
-export const redo = () => step(H.redo, H.undo);
+export const undo = () => step(H.undo, H.redo, "Undo");
+export const redo = () => step(H.redo, H.undo, "Redo");

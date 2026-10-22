@@ -50,9 +50,14 @@ Decisions already made:
       delete (`Alt`+click, right-click); clips snap to them. Magnet moved to `N`.
 - [x] Fix: a seek while the project still loads its audio no longer throws (stage gets the timeline first).
 
+- [x] Keyframes: `clip.keys` (clip-local time), numbers and colors blend, easing linear / in / out / in-out /
+      hold; panel ◆ per prop and easing menu; auto-key from panel, label drag, canvas and arrow keys;
+      ◆ marks on timeline clips (click, drag, delete); `Shift+K` / `Ctrl+Shift+K`; preview and export share
+      `propsAt()` in stage.js.
+
 ## Now
 
-- [ ] Keyframes.
+- [ ] Nothing planned. Ideas: keyframes for audio volume; a graph (curve) editor; keyframes on several clips at once.
 
 ## Timeline leftovers
 
@@ -76,6 +81,7 @@ Decisions already made:
 - [x] Edit several selected clips at once.
 - [x] Panel leftover: several clips with different values show "mixed".
 
-## Later
+## Keyframe leftovers
 
-- [ ] Keyframes for props (panel UI, markers on the timeline, interpolation, export).
+- [ ] With several clips selected the panel has no ◆ (edits still auto-key each animated clip).
+- [ ] Text and checkbox props cannot be keyed (they would only switch at a key).

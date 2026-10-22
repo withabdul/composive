@@ -54,6 +54,10 @@ addEventListener("keydown", (e) => {
   if (e.target.matches("textarea, input:not([type=range]), select")) return; // fields keep their native keys (Backspace, Ctrl+Z)
   const k = e.key.toLowerCase();
   const marks = (S.tl.markers ?? []).map((m) => m.t);
+  // keyframe times on the timeline, of the selected clips (or all clips)
+  const kfTimes = (selected().length ? selected() : clips()).flatMap((c) => Object.values(c.keys ?? {}).flat()
+    .map((k) => c.start + k.t - (c.offset || 0)).filter((t) => t >= c.start - EPS && t <= c.start + c.duration + EPS))
+    .sort((a, b) => a - b);
   if (e.ctrlKey || e.metaKey) {
     const keys = {
       z: () => (e.shiftKey ? redo() : undo()), y: redo,
@@ -61,6 +65,7 @@ addEventListener("keydown", (e) => {
       d: () => duplicate(selected()), a: () => { setSel(clips().filter((c) => !locked(c)).map((c) => c.id)); redraw(); },
       l: toggleLink,
       m: () => e.shiftKey && seek(marks.findLast((t) => t < S.t - EPS) ?? S.t), // Ctrl+Shift+M: previous marker
+      k: () => e.shiftKey && seek(kfTimes.findLast((t) => t < S.t - EPS) ?? S.t), // Ctrl+Shift+K: previous keyframe
     };
     if (keys[k]) { e.preventDefault(); keys[k](); }
     return;
@@ -74,6 +79,7 @@ addEventListener("keydown", (e) => {
   else if (k === "escape") { S.sel = null; redraw(); }
   else if (k === " ") { e.preventDefault(); S.playing ? pause() : play(); }
   else if (k === "j") playReverse();
+  else if (k === "k" && e.shiftKey) seek(kfTimes.find((t) => t > S.t + EPS) ?? S.t); // next keyframe
   else if (k === "k") pause();
   else if (k === "l") play();
   else if (k === "i") setRange("in");
