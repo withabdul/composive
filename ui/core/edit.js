@@ -453,6 +453,34 @@ export function addBuiltin(name) {
   return addClip("@" + name, { t: snap(S.t), track: (name === "solid" ? videos.at(-1) : videos[0])?.id });
 }
 
+// Where media `src` is used: [{ name, n }] per scene file ("global" = the global tracks), from the saved state.
+export function mediaUses(src) {
+  flushSave(); // S.project then holds the edits shown
+  const count = (tl) => tl.tracks.flatMap((t) => t.clips).filter((c) => c.src === src).length;
+  return [{ name: "global", n: count(S.project.timeline) }, ...S.project.scenes.map((s) => ({ name: s.slug, n: count(s.timeline) }))]
+    .filter((u) => u.n);
+}
+
+// Deletes a media file (the server moves it to .trash/) and every clip that uses it, in all scenes.
+// The clips in the view shown can be undone; those of the other scenes are saved at once.
+export async function removeMedia(src) {
+  const used = (c) => c.src === src;
+  if (clips().some(used)) {
+    record();
+    for (const tr of S.tl.tracks) tr.clips = tr.clips.filter((c) => !used(c));
+    if (S.sel && !findClip(S.sel)) S.sel = null;
+    commit();
+  }
+  flushSave();
+  for (const s of S.project.scenes) {
+    if (s.slug === S.scene || !s.timeline.tracks.some((t) => t.clips.some(used))) continue;
+    for (const tr of s.timeline.tracks) tr.clips = tr.clips.filter((c) => !used(c));
+    await fetch("/api/timeline?scene=" + s.slug, { method: "PUT", body: JSON.stringify(s.timeline) });
+  }
+  const res = await fetch("/api/media?src=" + encodeURIComponent(src), { method: "DELETE" });
+  toast(res.ok ? `Moved ${src.split("/").pop()} to .trash/` : "Could not delete: " + (await res.text()));
+}
+
 export function removeEmptyTracks() {
   if (S.tl.tracks.every((t) => t.clips.length)) return;
   record();

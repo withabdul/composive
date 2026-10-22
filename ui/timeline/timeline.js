@@ -563,7 +563,7 @@ sc.addEventListener("drop", (e) => {
 
 // Modal question with Cancel and a red action button. Resolves true on the action; Esc, Cancel or a click
 // outside resolve false. Cancel has the focus, so Enter does not delete by mistake.
-function ask(title, text, action) {
+export function ask(title, text, action) {
   return new Promise((done) => {
     const d = el("dialog", "modal"), box = el("div"), btns = el("div", "mbtns");
     const no = el("button", "", "Cancel"), yes = el("button", "danger", action);

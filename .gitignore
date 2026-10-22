@@ -9,3 +9,5 @@ out*.mp4
 # projects are local work; only the demo is shared
 projects/*
 !projects/example/
+# deleted media (the editor moves files here)
+.trash/

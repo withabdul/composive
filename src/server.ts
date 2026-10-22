@@ -1,5 +1,5 @@
-import { watch, readdirSync, existsSync, rmSync, mkdirSync } from "node:fs";
-import { join, resolve, basename, sep } from "node:path";
+import { watch, readdirSync, existsSync, rmSync, mkdirSync, renameSync } from "node:fs";
+import { join, resolve, basename, dirname, sep } from "node:path";
 import { MEDIA } from "../ui/canvas/stage.js";
 import { SCENE } from "../ui/core/project.js";
 import { mediaDest } from "./import.ts";
@@ -104,6 +104,19 @@ export function serve(dir: string, port = 9999) {
           return new Response("upload failed: " + String(e), { status: 500 });
         }
         return Response.json({ path: rel });
+      }
+
+      // Delete a media file: DELETE /api/media?src=media/a.mp4 moves it to <project>/.trash/media/a.mp4
+      // (a name taken there becomes a-1.mp4). The editor removes its clips first.
+      if (pathname === "/api/media" && req.method === "DELETE") {
+        const rel = (searchParams.get("src") ?? "").replaceAll("\\", "/");
+        const file = MEDIA.test(rel) && !rel.split("/").some((p) => p.startsWith(".")) ? safe(root, "/" + encodeURIComponent(rel).replaceAll("%2F", "/")) : null;
+        if (!file || !existsSync(file)) return new Response("not found", { status: 404 });
+        let dest = join(root, ".trash", rel), n = 0;
+        while (existsSync(dest)) dest = join(root, ".trash", rel.replace(/(\.[^./]+)$/, `-${++n}$1`));
+        mkdirSync(dirname(dest), { recursive: true });
+        renameSync(file, dest);
+        return new Response("ok");
       }
 
       // Does a media file have a sound stream? (ffprobe; 404 when ffprobe is missing, the client then decodes)

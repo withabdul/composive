@@ -1,7 +1,8 @@
 // Left sidebar: Scenes tab (presets, the clips of the scene shown), Media tab (import, search, media grid),
 // and the scene list in the top bar (the switch itself is in app.js).
 import { $, S, el, clips, kind, fmt, metaDur, redraw, toast, DRAG_SRC } from "../core/state.js";
-import { addClip, addBuiltin } from "../core/edit.js";
+import { addClip, addBuiltin, mediaUses, removeMedia } from "../core/edit.js";
+import { ask } from "../timeline/timeline.js";
 import { seek } from "../canvas/viewer.js";
 
 export function showTab(name) {
@@ -101,9 +102,22 @@ function tile(m) {
   add.title = "Add to timeline";
   add.onclick = (e) => { e.stopPropagation(); addClip(m); };
   th.append(el("span", "badge", k), dur, add);
+  const rm = el("button", "rm", "×");
+  rm.tabIndex = -1;
+  rm.title = "Delete (moves the file to .trash/)";
+  rm.onclick = (e) => { e.stopPropagation(); askRemove(m); };
   t.ondblclick = () => addClip(m);
+  th.append(rm);
   t.append(th, el("span", "mname", name));
   return t;
+}
+
+async function askRemove(m) {
+  const uses = mediaUses(m), n = uses.reduce((s, u) => s + u.n, 0), name = m.split("/").pop();
+  const text = n
+    ? `It is used by ${n} clip${n > 1 ? "s" : ""} (${uses.map((u) => u.name).join(", ")}). They will be deleted too. The file goes to .trash/.`
+    : "The file goes to .trash/ in the project folder.";
+  if (await ask(`Delete ${name}?`, text, "Delete")) removeMedia(m);
 }
 
 // drag a tile onto the timeline (timeline.js reads DRAG_SRC on drop)

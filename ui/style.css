@@ -53,7 +53,8 @@ body.drop #drop { border-color: var(--accent); color: var(--text); }
 .mthumb .dur { right: 2px; }
 .mthumb .dur:empty { display: none; }
 .mthumb .add { position: absolute; top: 2px; right: 2px; padding: 0 6px; opacity: 0; }
-.tile:hover .add { opacity: 1; }
+.mthumb .rm { position: absolute; top: 2px; left: 2px; padding: 0 6px; opacity: 0; }
+.tile:hover .add, .tile:hover .rm { opacity: 1; }
 .mname { display: block; padding: 2px 1px; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mempty { color: var(--dim); font-size: 12px; text-align: center; }
 body.drop::after { content: "Drop files or a folder to import"; position: fixed; inset: 8px; display: grid; place-items: center; z-index: 100; background: rgba(18,19,22,.85); border: 2px dashed var(--accent); border-radius: 8px; font-size: 20px; pointer-events: none; }
