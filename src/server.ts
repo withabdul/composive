@@ -159,13 +159,15 @@ export function serve(dir: string, port = 9999) {
         }
       }
 
-      // POST ?scene=001-hook&name=x starts one (no scene = the whole video) into exports/<name>.mp4,
+      // POST ?scene=001-hook&name=x&perf=low|normal|fast starts one (no scene = the whole video) into exports/<name>.mp4,
       // DELETE cancels it, GET = { state: running|done|error|cancelled, file, i, n, error }
       if (pathname === "/api/export") {
         if (req.method === "POST") {
           if (job?.state === "running") return new Response("an export is running", { status: 409 });
           const scene = searchParams.get("scene") || undefined;
           if (scene && !SCENE.test(scene)) return new Response("bad scene", { status: 400 });
+          const perf = (searchParams.get("perf") || "normal") as any;
+          if (!["low", "normal", "fast"].includes(perf)) return new Response("bad perf", { status: 400 });
           const name = (searchParams.get("name") ?? "").replace(/\.mp4$/i, "").replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "");
           if (!name) return new Response("bad name", { status: 400 });
           mkdirSync(join(root, "exports"), { recursive: true });
@@ -173,7 +175,7 @@ export function serve(dir: string, port = 9999) {
           while (existsSync(join(root, file))) file = `exports/${name}-${++k}.mp4`;
           const j = (job = { state: "running", file, i: 0, n: 0, ctl: new AbortController() });
           const { exportVideo } = await import("./export.ts"); // export.ts imports this file
-          exportVideo(root, join(root, file), scene, { port: server.port, signal: j.ctl.signal, onFrame: (i, n) => { j.i = i; j.n = n; } })
+          exportVideo(root, join(root, file), scene, { port: server.port, signal: j.ctl.signal, perf, onFrame: (i, n) => { j.i = i; j.n = n; } })
             .then(() => { j.state = "done"; })
             .catch((e) => {
               j.state = j.ctl.signal.aborted ? "cancelled" : "error";
