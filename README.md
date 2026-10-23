@@ -183,7 +183,7 @@ the clip's props, draws the first frame on load, and fades the page. GSAP is ser
 - Never use the CSS `translate`, `scale` or `rotate` properties on an element GSAP animates: GSAP moves them
   into its own transform and they are lost when the timeline is built again (the element jumps).
 - Helpers: `composive.range(t, start, len)` (0..1 progress), `composive.ease.in|out|inout|linear`,
-  `composive.clamp(v, a, b)`, `composive.props` (the defaults).
+  `composive.clamp(v, a, b)`, `composive.props` (the defaults), `composive.captions` / `captionAt` (see Captions).
 - `tl.timeScale()` has no effect (the runtime sets the time). Speed ramps:
   - one tween: a GSAP ease, `ease: "expo.inOut"`;
   - a custom speed curve: load `/lib/gsap/CustomEase.min.js`, then `CustomEase.create("ramp", "M0,0 C0.7,0 0.3,1 1,1")`
@@ -217,6 +217,38 @@ playhead, drag drops it on the timeline. It goes on the top video track, or on t
 - `@shape`: `color`, `w`, `h` (fractions of the frame), `round` (0 = rectangle, 1 = ellipse), `opacity`, `x`, `y`
 - `@lower` (lower third): `title`, `sub`, `color`, `accent`, `size`, `x`, `y` (top-left corner)
 - `@solid` (fills the frame): `color`, `opacity`
+- `@captions` (classic subtitles, one line on a box): `file`, `size`, `color`, `bg`, `bgOpacity`, `weight`, `font`, `width`, `x`, `y`
+- `@captions-tiktok` (big bold words, the word spoken now highlighted and popped): `file`, `size`, `color`,
+  `highlight`, `stroke`, `upper`, `pop`, `font`, `width`, `x`, `y`
+
+## Captions
+
+`composive captions <file> [-p project]` turns subtitles or word times into `<project>/media/<name>.captions.json`,
+which the `@captions*` templates read (`props.file`):
+
+```json
+{ "lines": [
+  { "t": 0.2, "e": 1.16, "words": [{ "w": "Halo", "t": 0.2, "e": 0.48 }, { "w": "semua,", "t": 0.48, "e": 0.88 }] }
+] }
+```
+
+Times are seconds from the clip start (so from the start of the voice: put the caption clip where the voice
+clip starts). One caption line per text line, so a wrong word is easy to fix by hand; the editor reloads it.
+
+- Input: `.srt` or `.vtt` (a cue has no word times: its words share the cue time by their length; a cue never
+  shares a line with the next one), or ElevenLabs JSON: text to speech "with timestamps"
+  (`alignment.characters` + `character_start_times_seconds` / `character_end_times_seconds`), forced alignment
+  or speech to text (`words: [{ text, start, end, type }]`; spacing and audio events are skipped).
+- Lines: at most `--words N` words (default 7; 3 with `--style captions-tiktok`), and a new line after `.`, `!`,
+  `?` or a pause of more than 0.5 s. A line shows from its first word until the next line, at most 0.6 s after
+  its last word.
+- `-o media/x.captions.json`: another file name (inside the project).
+- `--add`: also puts a clip (`--style captions` or `captions-tiktok`, default `captions`) on a new top track
+  `Captions` of the first scene (`--scene 001-hook` for another), at `--at 0` seconds, as long as the captions.
+  Captions go on a scene, not on a global track: global video tracks are under every scene.
+- A new caption style is a template that loads `/lib/composive.js` and uses `composive.captions(p.file)`
+  (a promise of the file) and `composive.captionAt(cap, t)` (`{ line, index, word }` or null); `seek` may be
+  `async`.
 
 ## Scene transitions
 

@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Captions TikTok</title>
+<!-- Template captions ("@captions-tiktok"): big bold words with an outline, the word spoken now in the
+     highlight color and popped. file = a .captions.json of the project (composive captions makes it, use
+     --words 3 or 4 for this style). x, y = the center of the line, as fractions of the frame; width = the
+     widest line, as a fraction of the frame width. -->
+<meta name="duration" content="4">
+<meta name="props" content='{"file":"","size":88,"color":"#ffffff","highlight":"#ffe14d","stroke":"#000000","upper":true,"pop":true,"font":"\"Arial Black\", Impact, system-ui, sans-serif","width":0.86,"x":0.5,"y":0.7}'>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #c { position: absolute; transform: translate(-50%, -50%); width: max-content; text-align: center; line-height: 1.15; font-weight: 900; }
+  #c i { display: inline-block; font-style: normal; margin: 0 0.22em; /* room for the pop and the outline */ paint-order: stroke fill; -webkit-text-stroke: 0.14em var(--stroke);
+         text-shadow: 0 0.06em 0.12em rgba(0, 0, 0, .45); }
+  #c.empty { opacity: .6; font-size: 40px !important; }
+</style>
+<div id="c"></div>
+<script src="/lib/composive.js"></script>
+<script>
+  const c = document.getElementById("c");
+  let shown; // the line drawn now ("" = none): its words are made once, then only restyled
+  window.seek = async (t, _duration, p = composive.props) => {
+    const cap = await composive.captions(p.file);
+    const at = composive.captionAt(cap, t);
+    composive.place(c, p);
+    Object.assign(c.style, { maxWidth: p.width * 100 + "%", fontSize: p.size + "px", fontFamily: p.font, color: p.color });
+    c.style.setProperty("--stroke", p.stroke);
+    c.classList.toggle("empty", !p.file);
+    if (!p.file) { shown = "empty"; c.textContent = "Captions: set file to a .captions.json"; return; }
+    const key = at ? `${at.index}|${p.upper}` : "";
+    if (key !== shown) {
+      shown = key;
+      c.replaceChildren(...(at ? at.line.words.map((w) => {
+        const i = document.createElement("i");
+        i.textContent = p.upper ? w.w.toLocaleUpperCase() : w.w;
+        return i;
+      }) : []));
+    }
+    if (!at) return;
+    [...c.children].forEach((el, k) => {
+      const now = k === at.word, w = at.line.words[k];
+      el.style.color = now ? p.highlight : "";
+      // pop: grows over the first 0.12 s of the word, back to normal at its end
+      const grow = now && p.pop ? 1 + 0.12 * composive.ease.out(composive.range(t, w.t, 0.12)) : 1;
+      el.style.transform = `scale(${grow})`;
+    });
+  };
+  seek(0);
+</script>

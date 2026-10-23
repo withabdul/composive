@@ -151,7 +151,7 @@ new EventSource("/api/events").onmessage = (e) => {
     if (isTimeline && snapshot() !== before) pushSnapshot(before); // an outside edit (the AI) can be undone too
     drawSide();
     if (name.startsWith("transitions/")) stage.reloadTransitions();
-    else if (/\.(html|css|js)$/.test(name)) stage.reloadScenes();
+    else if (/\.(html|css|js)$/.test(name) || (!isTimeline && name.endsWith(".json"))) stage.reloadScenes(); // .json: e.g. a .captions.json a scene reads
     await refresh();
   }, 150);
 };

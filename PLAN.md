@@ -70,8 +70,10 @@ Decisions already made:
 
 - [x] Sizes: `composive new <name> --preset youtube|reels|square|portrait|4k [--fps]`; size button and dialog
       in the editor (preset or custom, fps, one undo step); `check` flags an odd width or height.
-- [ ] Captions: `@captions` templates (more styles later, e.g. TikTok word highlight); words from SRT / VTT
-      (lines, words spread evenly) or ElevenLabs alignment JSON (word times).
+- [x] Captions: `composive captions <srt|vtt|json> [--add]` -> `media/<name>.captions.json`; templates
+      `@captions` (classic) and `@captions-tiktok` (word highlight, pop); runtime `composive.captions` /
+      `captionAt`; `check` reads the file; the editor reloads scenes when a .json changes.
+- [ ] Captions later: more styles; drop an .srt / alignment JSON in the editor; a word editor in the panel.
 - [ ] Audio: volume keyframes, music ducking under the voice.
 
 ## Now

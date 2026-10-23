@@ -88,6 +88,25 @@ export async function check(dir: string) {
     if (x.color !== undefined && (!t.color || !HEX.test(x.color))) err(file, `${name}.color: ${t.color ? "must be #rrggbb" : `"${x.type}" takes no color`}`, at);
   };
 
+  // a caption clip's file (props.file): { lines: [{ t, e, words: [{ w, t, e }] }] }, each file read once
+  const capFiles = new Map<string, string | null>();
+  const captionFile = async (file: string, at: string, rel: any) => {
+    if (!rel) return warn(file, "caption clip without props.file: it shows a hint, no captions (composive captions makes the file)", at);
+    if (!capFiles.has(rel)) {
+      let why: string | null = null;
+      try {
+        const cap = JSON.parse(await Bun.file(join(root, rel)).text());
+        const bad = !Array.isArray(cap?.lines) ? "no lines list"
+          : cap.lines.findIndex((l: any) => !num(l?.t) || !num(l?.e) || !Array.isArray(l?.words) || l.words.some((w: any) => typeof w?.w !== "string" || !num(w?.t) || !num(w?.e)));
+        if (bad === "no lines list") why = bad;
+        else if (bad >= 0) why = `line ${bad + 1} needs t, e and words [{ w, t, e }]`;
+      } catch (e: any) { why = existsSync(join(root, rel)) ? `not valid JSON: ${e.message}` : "not found"; }
+      capFiles.set(rel, why);
+    }
+    const why = capFiles.get(rel);
+    if (why) err(file, `props.file ${rel}: ${why}`, at);
+  };
+
   const links = new Map<string, string[]>();
   const tracks = async (file: string, tl: any, scene: boolean) => {
     if (!Array.isArray(tl.tracks)) return tl.tracks === undefined ? undefined : err(file, "tracks must be a list");
@@ -127,6 +146,7 @@ export async function check(dir: string) {
       const p = await page(c.src);
       if (!p) return err(file, c.src[0] === "@" ? `no template ${c.src} (templates/${c.src.slice(1)}/index.html)` : `src not found: ${c.src}`, at);
       defaults = p.defaults;
+      if (/^@captions\b/.test(c.src)) await captionFile(file, at, c.props?.file);
     } else {
       if (!MEDIA.test(c.src)) return err(file, `unsupported file type: ${c.src}`, at);
       if (!existsSync(join(root, c.src))) return err(file, `src not found: ${c.src}`, at);

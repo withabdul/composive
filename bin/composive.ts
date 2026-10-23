@@ -142,6 +142,15 @@ if (cmd === "dev") {
   const dir = /^[\w.-]+$/.test(dirArg) && dirArg !== "." && dirArg !== ".." ? join(PROJECTS, dirArg) : resolve(dirArg);
   try { newProject(dir, flag("--preset", "youtube")!, Number(flag("--fps", "30"))); }
   catch (e: any) { console.error(e.message ?? e); process.exit(1); }
+} else if (cmd === "captions" && dirArg) {
+  const { makeCaptions } = await import("../src/captions.ts");
+  const style = flag("--style", "captions")!.replace(/^@/, "");
+  try {
+    await makeCaptions(await project(flag("-p")), resolve(dirArg), {
+      out: flag("-o"), words: Number(flag("--words", style === "captions-tiktok" ? "3" : "7")), add: rest.includes("--add"),
+      scene: flag("--scene"), at: Number(flag("--at", "0")), style,
+    });
+  } catch (e: any) { console.error(e.message ?? e); process.exit(1); }
 } else if (cmd === "check") {
   const { runCheck } = await import("../src/check.ts");
   process.exit(await runCheck(await project(dirArg), rest.includes("--json")));
@@ -149,7 +158,7 @@ if (cmd === "dev") {
   const { importFolder } = await import("../src/import.ts");
   await importFolder(await project(flag("-p")), resolve(dirArg));
 } else {
-  console.log("usage:\n  composive new <name> [--preset youtube|reels|square|portrait|4k] [--fps 30]\n  composive dev [project] [--port 9999]\n  composive export [project] [-o out.mp4] [--scene 001-hook] [--low-perf | --fast-perf]\n  composive check [project] [--json]\n  composive frame [project] [--at 1,2.5 | --sheet 12] [--scene 001-hook] [-o f.png] [--json]\n  composive import <folder> [-p project]\n" +
+  console.log("usage:\n  composive new <name> [--preset youtube|reels|square|portrait|4k] [--fps 30]\n  composive dev [project] [--port 9999]\n  composive export [project] [-o out.mp4] [--scene 001-hook] [--low-perf | --fast-perf]\n  composive check [project] [--json]\n  composive frame [project] [--at 1,2.5 | --sheet 12] [--scene 001-hook] [-o f.png] [--json]\n  composive import <folder> [-p project]\n  composive captions <file.srt|.vtt|.json> [-p project] [-o media/x.captions.json] [--words 7] [--add [--style captions|captions-tiktok] [--scene 001-hook] [--at 0]]\n" +
     "project = a name in projects/ (e.g. example) or a path; leave it out to pick from a menu");
   process.exit(1);
 }
