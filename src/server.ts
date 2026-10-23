@@ -6,6 +6,9 @@ import { mediaDest } from "./import.ts";
 
 const UI = resolve(import.meta.dir, "..", "ui");
 const TEMPLATES = resolve(import.meta.dir, "..", "templates");
+const TRANSITIONS = resolve(import.meta.dir, "..", "transitions"); // transitions/<type>.js, served at /tr/
+const LIB = resolve(import.meta.dir, "..", "lib"); // clip runtime, /lib/composive.js
+const GSAP = resolve(import.meta.dir, "..", "node_modules", "gsap", "dist"); // /lib/gsap/gsap.min.js, plugins too
 const EMPTY = {
   fps: 30, width: 1920, height: 1080,
   tracks: [{ id: "V1", type: "video", clips: [] }, { id: "A1", type: "audio", clips: [] }],
@@ -99,9 +102,12 @@ export function serve(dir: string, port = 9999) {
     }, 80));
   });
 
-  // a template edit reloads the editor too (sent as templates/<path>, outside the project)
+  // a template or transition edit reloads the editor too (sent as templates/<path>, outside the project)
   if (existsSync(TEMPLATES)) watch(TEMPLATES, { recursive: true }, (_, name) => {
     if (name) send(`data: templates/${name.replaceAll("\\", "/")}\n\n`);
+  });
+  if (existsSync(TRANSITIONS)) watch(TRANSITIONS, (_, name) => {
+    if (name) send(`data: transitions/${name}\n\n`);
   });
 
   // one export at a time, started by the editor's Export button; GET /api/export reads its progress
@@ -191,6 +197,9 @@ export function serve(dir: string, port = 9999) {
       if (pathname === "/render") return sendFile(req, join(UI, "render.html"));
       if (pathname.startsWith("/ui/")) return sendFile(req, safe(UI, pathname.slice(3)));
       if (pathname.startsWith("/t/")) return sendFile(req, safe(TEMPLATES, pathname.slice(2)));
+      if (pathname.startsWith("/tr/")) return sendFile(req, safe(TRANSITIONS, pathname.slice(3)));
+      if (pathname.startsWith("/lib/gsap/")) return sendFile(req, safe(GSAP, pathname.slice(9)));
+      if (pathname.startsWith("/lib/")) return sendFile(req, safe(LIB, pathname.slice(4)));
       if (pathname.startsWith("/p/")) return sendFile(req, safe(root, pathname.slice(2)));
 
       if (pathname === "/api/events") {
@@ -242,6 +251,8 @@ export function serve(dir: string, port = 9999) {
             }))),
             media: files.filter((p) => MEDIA.test(p) && !p.startsWith("exports/")),
             templates: await templates(),
+            transitions: existsSync(TRANSITIONS)
+              ? readdirSync(TRANSITIONS).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3)).sort() : [],
           });
         } catch (e) {
           // AI may be mid-edit; the UI keeps its last good state.

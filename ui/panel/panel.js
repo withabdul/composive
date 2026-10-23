@@ -2,9 +2,9 @@
 // The form is rebuilt only when what it is built from changes (keyOf); otherwise the inputs are
 // just synced, so typing never loses focus. With several clips selected, the fields show the main
 // clip and an edit applies to all of them (start moves them all by the same amount).
-import { $, S, el, MIN, EPS, bus, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
+import { $, S, el, MIN, EPS, bus, redraw, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place, setProp, toggleKey, setEase, localAt } from "../core/edit.js";
+import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place, setProp, toggleKey, setEase, localAt, selTransition } from "../core/edit.js";
 import { propsAt, EASES } from "../canvas/stage.js";
 import { ui } from "../canvas/viewer.js";
 
@@ -265,7 +265,72 @@ function sync(c) {
   if (json) paintJson();
 }
 
+// The selected transition: type, duration, easing, direction (when the type has some), Delete.
+// Built again when it changes; each change is one undo step.
+function trPanel() {
+  const st = selTransition(), t = S.trSel;
+  if (!st) return false;
+  $("#panel").hidden = false;
+  document.body.classList.add("panel");
+  const key = "tr|" + JSON.stringify(t) + JSON.stringify(st.x);
+  if (key === shownKey) return true;
+  shownKey = key;
+  body.innerHTML = "";
+  $("#pTitle").textContent = `Transition ${t.side}` + (t.kind === "scene" ? ` (${t.slug})` : "");
+  // an `in` with a clip or scene just before it: between the two, or (only) on this one alone
+  const what = t.kind === "scene" ? "scene" : "clip";
+  const partner = t.side === "in" && (t.kind === "scene" ? S.project.scenes.findIndex((s) => s.slug === t.slug) > 0
+    : trackOf(st.c).clips.some((x) => Math.abs(x.start + x.duration - st.c.start) < EPS));
+  const g = group("Transition");
+  const row = (label, input) => { const r = el("label", "pf"); r.append(el("span", "", label), input); g.append(r); return input; };
+  const type = row("type", el("select"));
+  for (const n of S.project.transitions) type.append(new Option(n, n));
+  type.value = st.x.type;
+  const dur = row("duration", el("input"));
+  Object.assign(dur, { type: "number", step: "0.1", min: String(MIN), value: st.x.duration ?? 0.6 });
+  const ease = row("easing", el("select"));
+  for (const v of EASES.filter((v) => v !== "hold")) ease.append(new Option(v === "inout" ? "ease in-out" : v === "in" ? "ease in" : v === "out" ? "ease out" : v, v));
+  ease.value = st.x.ease ?? "inout";
+  const dir = row("direction", el("select"));
+  const color = row("color", el("input"));
+  color.type = "color";
+  dir.parentElement.hidden = color.parentElement.hidden = true;
+  const only = row(`only this ${what}`, el("input"));
+  only.type = "checkbox";
+  only.checked = !!st.x.only;
+  only.parentElement.hidden = !partner;
+  import(`/tr/${st.x.type}.js`).then((m) => { // what this type takes: dirs (a menu), color (its default)
+    if (m.dirs) {
+      for (const d of m.dirs) dir.append(new Option(d, d));
+      dir.value = st.x.dir ?? m.dirs[0];
+      dir.parentElement.hidden = false;
+    }
+    if (m.color) { color.value = st.x.color ?? m.color; color.parentElement.hidden = false; }
+  }).catch(() => {});
+  const save = () => {
+    const x = { ...st.x, type: type.value, duration: Math.max(MIN, dur.valueAsNumber || 0.6), ease: ease.value };
+    if (type.value !== st.x.type) { delete x.dir; delete x.color; } // another type has other options
+    else {
+      if (!dir.parentElement.hidden) x.dir = dir.value;
+      if (!color.parentElement.hidden) x.color = color.value;
+    }
+    if (partner && only.checked) x.only = true; else delete x.only;
+    selTransition()?.set(x);
+    focusSnap = JSON.stringify(S.tl); // the setter recorded its own undo step
+  };
+  for (const i of [type, dur, ease, dir, color, only]) i.onchange = (e) => { e.stopPropagation(); save(); i.blur(); };
+  g.append(el("p", "pnote", t.side === "out" ? `Plays over the end of this ${what} only (its in style, backwards). Not used when the next ${what} has a transition on this ${t.kind === "scene" ? "seam" : "cut"} that is not "only".`
+    : partner && !st.x.only ? (t.kind === "scene" ? "Between the two scenes: this scene starts this much earlier, over the end of the scene before."
+      : "Between the two clips: centered on the cut, both clips play.")
+    : `Plays over the start of this ${what} only, over what is under it.`));
+  const act = group("Actions");
+  act.classList.add("pa");
+  button(act, "Delete", () => { selTransition()?.set(null); S.trSel = null; redraw(); });
+  return true;
+}
+
 function render() {
+  if (S.trSel && trPanel()) return;
   if (S.sel !== lastSel) { lastSel = S.sel; closedFor = null; }
   const c = S.sel && findClip(S.sel);
   const show = !!c && closedFor !== c.id;
@@ -321,7 +386,11 @@ function settle(path) {
 body.addEventListener("change", (e) => { settle(e.target.dataset.path); flush(); });
 body.addEventListener("focusout", flush);
 
-$("#pClose").onclick = () => { closedFor = S.sel; render(); };
+$("#pClose").onclick = () => {
+  if (S.trSel) { S.trSel = null; return redraw(); } // closing a transition's panel deselects it
+  closedFor = S.sel;
+  render();
+};
 bus.addEventListener("redraw", render);
 // the playhead moved (seek, playback): animated values and keyframe buttons change
 bus.addEventListener("time", () => {

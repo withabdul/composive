@@ -31,6 +31,9 @@ export const LABEL = 124; // width of the track header column, px (same as --lab
 export const ROW = { video: 52, audio: 68 }; // track heights, px
 export const MIN = 0.1; // shortest clip, seconds
 export const DRAG_SRC = "application/x-composive-src"; // drag data: a scene or media path from the sidebar
+export const DRAG_TR = "application/x-composive-transition"; // drag data: a transition type from the sidebar
+// select a transition (clears the clip selection)
+export function selectTransition(t) { S.sel = null; S.trSel = t; }
 
 export const S = {
   tl: null, project: null,
@@ -41,7 +44,9 @@ export const S = {
   // Setting `sel` clears `extra`, so plain code that selects one clip needs no change.
   _sel: null, extra: new Set(),
   get sel() { return this._sel; },
-  set sel(v) { this._sel = v; this.extra.clear(); },
+  set sel(v) { this._sel = v; this.extra.clear(); this.trSel = null; },
+  // the selected transition instead of clips: { kind: "clip" | "scene", id | slug, side: "in" | "out" }
+  trSel: null,
   drag: null, // active pointer drag, see timeline.js and gizmo.js
   magnet: false, // on: delete and trim close gaps (ripple); Shift does the other way
   overwrite: false, // on: a clip moved, trimmed or pasted onto another cuts it; off: it goes to a free spot

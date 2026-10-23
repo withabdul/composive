@@ -24,6 +24,33 @@ export function audible(tl) {
   return aud.filter((t) => (solo ? t.solo : !t.mute)).flatMap((t) => t.clips);
 }
 
+// Transitions of the clips on one video track: [{ x, a, b, from, to }], a..b in video time.
+// c.in at a cut (the clip before ends where c starts) is centered on the cut and shows both clips
+// (from = the clip before, to = c); c.in with no clip before, or with `only: true`, plays over the start
+// of c (from = null); c.out plays over the end of c (to = null), unless the next clip's `in` uses that cut.
+// The clips limit the length: a cut takes half of it from each side.
+export function clipTransitions(tr) {
+  const cs = [...tr.clips].sort((p, q) => p.start - q.start), out = [];
+  const cut = (p, q) => p && q && Math.abs(p.start + p.duration - q.start) < 1e-6 && !q.in?.only;
+  cs.forEach((c, i) => {
+    const prev = cs[i - 1], next = cs[i + 1];
+    if (c.in?.type) {
+      if (cut(prev, c)) {
+        const d = Math.min(c.in.duration ?? 0.6, 2 * prev.duration, 2 * c.duration);
+        out.push({ x: c.in, a: c.start - d / 2, b: c.start + d / 2, from: prev, to: c });
+      } else {
+        const d = Math.min(c.in.duration ?? 0.6, c.duration);
+        out.push({ x: c.in, a: c.start, b: c.start + d, from: null, to: c });
+      }
+    }
+    if (c.out?.type && !(cut(c, next) && next.in?.type)) { // (cut() is false for an `only` in)
+      const e = c.start + c.duration, d = Math.min(c.out.duration ?? 0.6, c.duration);
+      out.push({ x: c.out, a: e - d, b: e, from: c, to: null });
+    }
+  });
+  return out;
+}
+
 /* ---------- keyframes ---------- */
 // clip.keys = { prop: [{ t, v, ease }] }, sorted by t. t is clip-local time (offset included, the
 // same time a scene gets), so keys stay on the content when the clip is moved, trimmed or split.
@@ -86,7 +113,41 @@ function syncVideo(v, target, playing) {
 
 export function createStage(root, base = "/p/") {
   const nodes = new Map(); // clip id -> { el, k, src, ready }
-  let tl = null;
+  const groups = new Map(); // scene slug -> the box of its layers: a transition moves or fades the whole scene
+  const mods = new Map(); // transition type -> Promise of its module, transitions/<type>.js
+  let tl = null, ver = 0; // ver: reloadTransitions() makes a new URL so the edited file loads
+
+  // a track's scene: "001-hook/V1" (all scenes), a scene track of the scene shown, or null (global)
+  const sceneOf = (tr) => (tr.id.startsWith("G") ? null : tr.id.includes("/") ? tr.id.split("/")[0] : tl.view ?? null);
+  function group(slug, z) {
+    if (!slug) return root;
+    let g = groups.get(slug);
+    if (!g) { g = document.createElement("div"); g.className = "layer"; groups.set(slug, g); root.append(g); }
+    g.style.zIndex = z;
+    return g;
+  }
+  const transition = (type) => {
+    if (!mods.has(type)) mods.set(type, import(`/tr/${type}.js?v=${ver}`).catch(() => null));
+    return mods.get(type);
+  };
+  // set this frame's transition style on a scene box; remove what the last frame set and this one does not
+  function fx(g, s) {
+    for (const k of g.fx ?? []) if (!(k in s)) g.style[k] = "";
+    Object.assign(g.style, s);
+    g.fx = Object.keys(s);
+  }
+  // A transition's `over`: a layer over both sides (a color dip, a flash, a panel that covers the frame).
+  // One per transition (key), reused; render() hides the ones this frame did not use.
+  const overs = new Map();
+  function over(key, parent, z, s) {
+    let o = overs.get(key);
+    if (!o) { o = document.createElement("div"); o.className = "layer"; overs.set(key, o); }
+    if (o.parentNode !== parent) parent.append(o);
+    o.style.zIndex = z;
+    o.style.display = "";
+    fx(o, s);
+    o.used = true;
+  }
 
   // Default props of a scene come from its <meta name="props" content='{"title":"..."}'>, re-read on every load.
   function loadScene(n) {
@@ -96,7 +157,7 @@ export function createStage(root, base = "/p/") {
     }, { once: true }));
   }
 
-  function make(c) {
+  function make(c, parent) {
     const k = kind(c.src), url = c.src[0] === "@" ? `/t/${c.src.slice(1)}/index.html` : base + c.src;
     const n = { k, src: c.src, defaults: k === "scene" ? {} : { ...MEDIA_PROPS } };
     let el, ready;
@@ -112,7 +173,11 @@ export function createStage(root, base = "/p/") {
       ready = el.decode().catch(() => {});
     }
     el.className = "layer"; el.style.display = "none";
-    root.append(el);
+    // the wrap gets the clip's transition style, so it does not mix with the clip's own transform
+    n.wrap = document.createElement("div");
+    n.wrap.className = "layer";
+    n.wrap.append(el);
+    parent.append(n.wrap);
     n.el = el;
     n.ready ??= ready;
     return n;
@@ -123,20 +188,32 @@ export function createStage(root, base = "/p/") {
       tl = next;
       root.style.width = tl.width + "px"; root.style.height = tl.height + "px";
       const want = new Map();
+      const slugs = [...new Set(tl.tracks.map(sceneOf).filter(Boolean))].sort();
       tl.tracks.forEach((tr, i) => {
         if (tr.type === "audio" || tr.hide) return; // hidden tracks are left out of preview and export
-        for (const c of tr.clips) want.set(c.id, { c, z: tl.tracks.length - i });
+        const s = sceneOf(tr);
+        // scene boxes above the global layers, a later scene above the one before (it comes in over it)
+        const parent = group(s, 10000 + slugs.indexOf(s));
+        // z: 3 per track; +1 = the clip coming in at a cut, +2 = a clip transition's `over` layer (render)
+        for (const c of tr.clips) want.set(c.id, { c, z: 3 * (tl.tracks.length - i), parent });
       });
       for (const [id, n] of nodes) {
-        if (!want.has(id) || want.get(id).c.src !== n.src) { n.el.remove(); nodes.delete(id); }
+        if (!want.has(id) || want.get(id).c.src !== n.src) { n.wrap.remove(); nodes.delete(id); }
       }
-      for (const [id, { c, z }] of want) {
-        if (!nodes.has(id)) nodes.set(id, make(c));
+      for (const [id, { c, z, parent }] of want) {
+        if (!nodes.has(id)) nodes.set(id, make(c, parent));
         const n = nodes.get(id);
         n.c = c;
-        n.el.style.zIndex = z; // first track = top layer (props are applied by render)
+        n.z = z; // first track = top layer; odd z = the clip coming in at a cut (render)
+        n.wrap.style.zIndex = z;
+        if (n.wrap.parentNode !== parent) { // its track moved between a scene and the global tracks
+          parent.append(n.wrap);
+          if (n.k === "scene") loadScene(n); // a moved iframe loads its page again
+        }
       }
+      for (const [s, g] of groups) if (!g.children.length) { g.remove(); groups.delete(s); }
     },
+    reloadTransitions() { mods.clear(); ver++; },
     ready: () => Promise.all([...nodes.values()].map((n) => n.ready)),
     defaults: (id) => nodes.get(id)?.defaults ?? {},
     win: (id) => (nodes.get(id)?.k === "scene" ? nodes.get(id).el.contentWindow : null), // a scene's window
@@ -191,14 +268,57 @@ export function createStage(root, base = "/p/") {
       }
     },
     async render(t, playing = false) {
+      // transitions: the scene before and the scene after get a style from transitions/<type>.js
+      const style = new Map();
+      for (const o of overs.values()) o.used = false;
+      for (const x of tl.transitions ?? []) {
+        if (t < x.a || t >= x.b) continue;
+        const f = (await transition(x.type))?.default;
+        if (!f) continue;
+        const p = (EASE[x.ease] ?? EASE.inout)((t - x.a) / (x.b - x.a));
+        const s = x.to ? f(p, x) : f(1 - p, x); // a scene's out alone: its in style, backwards
+        if (!s) continue;
+        if (x.from && x.to) {
+          if (groups.has(x.from)) style.set(groups.get(x.from), s.a ?? {});
+          if (groups.has(x.to)) style.set(groups.get(x.to), s.b ?? {});
+        } else if (groups.has(x.to ?? x.from)) style.set(groups.get(x.to ?? x.from), s.b ?? {});
+        if (s.over) over(`s:${x.from}>${x.to}`, root, 20000, s.over); // over every scene box
+      }
+      for (const g of groups.values()) fx(g, style.get(g) ?? {});
+      // clip transitions: style by clip id. At a cut both clips show (the clip before past its end, the
+      // next one before its start); a clip with no partner plays the `in` style (`out` = `in` backwards)
+      const cstyle = new Map(), top = new Set();
+      for (const tr of tl.tracks) {
+        if (tr.type === "audio" || tr.hide) continue;
+        for (const x of clipTransitions(tr)) {
+          if (t < x.a || t >= x.b) continue;
+          const f = (await transition(x.x.type))?.default;
+          if (!f) continue;
+          const p = (EASE[x.x.ease] ?? EASE.inout)((t - x.a) / (x.b - x.a));
+          const s = x.to ? f(p, x.x) : f(1 - p, x.x);
+          if (!s) continue;
+          if (x.from && x.to) {
+            cstyle.set(x.from.id, s.a ?? {}); cstyle.set(x.to.id, s.b ?? {});
+            top.add(x.to.id);
+          } else cstyle.set((x.to ?? x.from).id, s.b ?? {});
+          const n = nodes.get((x.to ?? x.from).id); // the over layer: on this track, over both clips
+          if (s.over && n) over(`c:${x.from?.id}>${x.to?.id}`, n.wrap.parentNode, n.z + 2, s.over);
+        }
+      }
+      for (const o of overs.values()) if (!o.used) o.style.display = "none";
       const jobs = [];
       for (const tr of tl.tracks) for (const c of tr.clips) {
         const n = nodes.get(c.id);
         if (!n) continue;
-        const on = t >= c.start && t < c.start + c.duration;
+        fx(n.wrap, cstyle.get(c.id) ?? {});
+        n.wrap.style.zIndex = n.z + top.has(c.id);
+        const on = (t >= c.start && t < c.start + c.duration) || cstyle.has(c.id);
         n.el.style.display = on ? "" : "none";
         if (!on) { if (n.k === "video" && !n.el.paused) n.el.pause(); continue; }
-        const local = t - c.start + (c.offset ?? 0);
+        let local = t - c.start + (c.offset ?? 0);
+        // outside the clip (a cut transition): after its end the clip plays on (a video shows its source frames
+        // there); before its start a video shows the source frames before, an HTML clip holds its first frame
+        local = Math.max(n.k === "scene" ? c.offset ?? 0 : 0, local);
         if (n.k === "scene") { // its defaults are known once loaded
           jobs.push(n.ready.then(() => {
             n.p = propsAt(c, n.defaults, local);

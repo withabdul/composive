@@ -38,7 +38,7 @@ Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes beco
 ```
 app.js            startup, shortcuts, live reload
 export.js         Export button: dialog, progress, cancel (renders on the server into exports/)
-core/             state.js shared state and helpers, history.js undo stacks (one per scene),
+core/             state.js shared state and helpers, history.js undo stacks (one for the project),
                   edit.js every timeline change plus undo/redo and save,
                   project.js scenes <-> one timeline (shared with export)
 canvas/           stage.js frame renderer shared with export, viewer.js transport and ui(),
@@ -62,7 +62,8 @@ my-project/
 
 A video is a row of scenes. A scene folder name must be `###-slug` (e.g. `001-hook`); other folders in
 `scenes/` are skipped with a warning. The number sets the order. A scene starts where the scene before it
-ends (the end of its last clip), so a longer scene moves the scenes after it. Global tracks (music, a voice
+ends (the end of its last clip), so a longer scene moves the scenes after it. A scene with a transition
+starts earlier, over the end of the scene before (see Scene transitions). Global tracks (music, a voice
 over the whole video) are in video time and do not move with the scenes.
 
 Editor: the top bar list switches the scene shown; `+ Scene` makes the next folder (`003-<name>`).
@@ -71,8 +72,9 @@ Editor: the top bar list switches the scene shown; `+ Scene` makes the next fold
   before its scene. `G` on a track header moves the track between this scene and the global tracks.
 - `All scenes` shows the whole video: every scene's tracks read-only (named `001-hook/V1`), the global
   tracks editable. New tracks there are global.
-- The Scenes tab lists the HTML clips of the scene shown. Undo history is kept per scene; it is cleared when
-  the global tracks or the scene start changed while another scene was shown.
+- The Scenes tab lists the HTML clips of the scene shown. Undo history is one for the whole project (each step
+  holds every timeline.json): an undo works in any view, also for a change made in another scene (the view
+  stays; the toast names the other scenes that changed). Outside edits of a timeline.json (the AI) are undoable too.
 
 ## Clip contract
 
@@ -87,6 +89,43 @@ An HTML clip is an HTML page that draws itself as a pure function of time:
 
 No timers or `requestAnimationFrame`: the editor and the exporter both call `seek` for every frame.
 Use a transparent `body` background if the scene is an overlay.
+
+### Runtime and GSAP
+
+`/lib/composive.js` (from `lib/`) writes `window.seek` for you: it merges the `<meta name="props">` defaults with
+the clip's props, draws the first frame on load, and fades the page. GSAP is served at `/lib/gsap/` (from
+`node_modules/gsap/dist`, plugins too); preview and export both work offline. A clip that writes its own
+`window.seek` still works.
+
+```html
+<script src="/lib/gsap/gsap.min.js"></script>   <!-- only if timeline is used -->
+<script src="/lib/composive.js"></script>
+<script>
+  const el = document.getElementById("title");
+  composive.clip({
+    update: (p, t, duration) => { el.textContent = p.title; composive.place(el, p); }, // every frame
+    timeline: (tl, p, duration) => tl.from(el, { y: 80, opacity: 0, duration: 1 }),   // set to time t each frame
+    fadeIn: 0, fadeOut: 0.5,                                                         // seconds, whole page
+  });
+</script>
+```
+
+- Add every tween to `tl`. A tween made with `gsap.to()` outside `tl` runs in real time and breaks the export.
+- The timeline is built again when the props or `duration` change, so the timeline can use props. A keyframed
+  prop changes every frame and makes a rebuild every frame (slower): set text, colors and position in `update`.
+- Never set the same style in `update` and in the timeline.
+- `composive.place(el, p)` sets `left`/`top` from `p.x`, `p.y`. To center an element GSAP animates, use
+  `gsap.set(el, { xPercent: -50, yPercent: -50 })` in `timeline` (without GSAP: CSS `transform: translate(-50%, -50%)`).
+- Never use the CSS `translate`, `scale` or `rotate` properties on an element GSAP animates: GSAP moves them
+  into its own transform and they are lost when the timeline is built again (the element jumps).
+- Helpers: `composive.range(t, start, len)` (0..1 progress), `composive.ease.in|out|inout|linear`,
+  `composive.clamp(v, a, b)`, `composive.props` (the defaults).
+- `tl.timeScale()` has no effect (the runtime sets the time). Speed ramps:
+  - one tween: a GSAP ease, `ease: "expo.inOut"`;
+  - a custom speed curve: load `/lib/gsap/CustomEase.min.js`, then `CustomEase.create("ramp", "M0,0 C0.7,0 0.3,1 1,1")`
+    and `ease: "ramp"`;
+  - a whole sequence: `tl.add(composive.ramp(inner, 2.5, "power4.inOut"))` plays all of the timeline `inner`
+    in 2.5 s along the ease (`inner` is a `gsap.timeline()` made inside `timeline`).
 
 ### Props (editable text, colors, position)
 
@@ -115,9 +154,84 @@ playhead, drag drops it on the timeline. It goes on the top video track, or on t
 - `@lower` (lower third): `title`, `sub`, `color`, `accent`, `size`, `x`, `y` (top-left corner)
 - `@solid` (fills the frame): `color`, `opacity`
 
+## Scene transitions
+
+A scene can have a transition from the scene before it (`transition`) and one at its end (`out`), in its `timeline.json`:
+
+```json
+{ "transition": { "type": "push", "duration": 0.5, "ease": "inout", "dir": "left" }, "tracks": [...] }
+```
+
+The scene then starts `duration` seconds before the scene before it ends (the two overlap), so the video gets
+shorter by that much. During the overlap both scenes play: the scene before keeps running to its end and the
+next one runs from its start. `ease`: `linear`, `in`, `out`, `inout` (default). The duration is limited to the
+length of both scenes.
+
+- `transition` on the first scene, or with `"only": true`: no overlap, it plays over the start of this scene
+  alone (e.g. a fade in from black at the start of the video).
+- `out`: plays over the end of this scene alone (its in style, backwards; e.g. a fade out to black at the end).
+  Not used when the next scene has a `transition` that is not `only` (one transition per seam).
+- "All scenes" and the export of the whole video show the full transition. A scene view (and `export --scene`)
+  has only that scene, so it shows its half over black (the next scene coming in, or this one going out).
+- The scene after is on top of the scene before. Global tracks stay under both and do not move.
+- Audio clips of the next scene start earlier too, as the scene does.
+- One motion per seam. A scene that animates its own exit (content flies out, fades out) and a transition at
+  the same time look wrong. With a transition after a scene, let its content hold to the end; with a
+  transition into a scene, start its content animation after the transition shows it (from about
+  `duration / 2`; with `cover`, `dip` and `flash` the next scene shows from the middle). A scene that already
+  ends with its own exit motion needs at most a short `flash`, or no transition.
+
+Types are files in `transitions/` (repo root, shared by all projects, served at `/tr/`): `fade`, `push`, `slide`,
+`wipe`, `iris`, `zoom`, `blur`, `dip` (through a color, default black), `flash` (a short bright burn, default white),
+`cover` (a color panel crosses the frame). `push`, `slide`, `wipe` and `cover` take `dir`: `left`, `right`, `up`,
+`down` (where it moves); `dip`, `flash` and `cover` take `color` (`#rrggbb`). Add a file to add a type; the editor reloads:
+
+```js
+// transitions/<type>.js. p = eased progress 0..1, x = the scene's transition object (dir and any other field).
+export const dirs = ["left", "right"];            // optional: the editor shows a direction menu
+export const color = "#000000";                   // optional: the editor shows a color picker (this is the default)
+export default (p, x) => ({
+  a: { transform: `scale(${1 + p})` },            // CSS of the scene before (keys as in element.style)
+  b: { opacity: p },                              // CSS of the next scene
+  over: { background: x.color ?? color, opacity: 1 - Math.abs(2 * p - 1) }, // optional: a layer over both
+});
+```
+
+The style is set on a box that holds all layers of one scene; outside the overlap it is removed.
+
+## Clip transitions
+
+A clip on a video track can have `in` and `out` (same object as a scene transition):
+
+```json
+{ "src": "media/b.mp4", "start": 4, "duration": 3, "in": { "type": "wipe", "duration": 0.6, "dir": "left" } }
+```
+
+- `in` at a cut (the clip before on the same track ends where this one starts): the transition between the
+  two clips. It is centered on the cut and the clips do not move: the clip before plays on for half the
+  duration and this clip starts half the duration early. A video uses its source frames there. An HTML clip
+  before it plays on past its end (its `seek` gets t > duration); an HTML clip after it holds its first frame.
+  A clip that fades itself out at its end shows nothing there, so leave the fade to the transition.
+- `in` with no clip before it, or with `"only": true`: plays over the first `duration` seconds of this clip
+  alone, over the tracks under it (at a cut: the clip before ends with a hard cut, or with its own `out`).
+- `out`: plays over the last seconds of the clip alone (the `in` style, backwards). Not used when the next
+  clip's `in` uses the same cut (an `in` that is not `only`). Split keeps `in` on the left part and `out` on the right part.
+
+## Transitions in the editor
+
+- The Scenes bar under the ruler shows a block per scene (double-click: open it) and the scene transitions on
+  the seams. Clip transitions show over the clips of their track.
+- Drag a card from Transitions (sidebar, Scenes tab; hover plays a preview) onto the timeline. On a cut between
+  two clips or a seam in the Scenes bar (8 px around it): the transition between the two. On the left half of a
+  clip or scene block: `in`, of that one alone (`only`) when there is one before it. On the right half: `out`.
+  The line shows where it goes. The panel's "only this clip / scene" box switches an `in` between the two kinds.
+- Click a transition block to select it: the right panel sets type, duration, easing and direction. Drag the
+  block to change its duration. `Delete`, right-click or the panel's Delete removes it. A click on a Transitions
+  card gives the selected transition that type.
+
 ## timeline.json
 
-`timeline.json` (global) and `scenes/<slug>/timeline.json` (a scene: only `tracks` and `markers`) use the same
+`timeline.json` (global) and `scenes/<slug>/timeline.json` (a scene: `tracks`, `markers` and `transition`) use the same
 track and clip format:
 
 ```json

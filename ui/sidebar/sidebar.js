@@ -1,7 +1,7 @@
 // Left sidebar: Scenes tab (the clips of the scene shown, then the templates), Media tab (import, search, media grid),
 // and the scene list in the top bar (the switch itself is in app.js).
-import { $, S, el, clips, kind, fmt, metaDur, redraw, toast, DRAG_SRC } from "../core/state.js";
-import { addClip, addTemplate, mediaUses, removeMedia } from "../core/edit.js";
+import { $, S, el, clips, kind, fmt, metaDur, redraw, toast, DRAG_SRC, DRAG_TR } from "../core/state.js";
+import { addClip, addTemplate, mediaUses, removeMedia, selTransition } from "../core/edit.js";
 import { ask } from "../timeline/timeline.js";
 import { seek } from "../canvas/viewer.js";
 
@@ -16,6 +16,7 @@ let cards = new Map(), tiles = new Map();
 export function forgetSide(name) {
   tiles.delete(name);
   tpls.delete(name.match(/^templates\/([^/]+)\//)?.[1]); // a file in that template's folder
+  trTiles.delete(name.match(/^transitions\/(.+)\.js$/)?.[1]);
   for (const path of cards.keys()) if (name.startsWith(path.slice(0, path.lastIndexOf("/") + 1))) cards.delete(path); // a file in that scene's folder
 }
 
@@ -42,6 +43,7 @@ export function drawSide() {
   tiles = new Map(S.project.media.map((m) => [m, tiles.get(m) ?? tile(m)]));
   fill($("#scenes"), [...cards.values()]);
   drawTemplates(size);
+  drawTransitions();
   fill($("#media"), [...tiles.values()]);
   $('[data-tab="media"]').textContent = `Media (${S.project.media.length})`;
   filter();
@@ -197,3 +199,48 @@ function tplCard(t, key) {
   return c;
 }
 
+
+// one tile per transitions/<type>.js: a preview where A turns into B, played on hover.
+// Drag it onto the timeline; a click gives the selected transition this type.
+let trTiles = new Map();
+function drawTransitions() {
+  trTiles = new Map((S.project.transitions ?? []).map((t) => [t, trTiles.get(t) ?? trTile(t)]));
+  fill($("#transitions"), [...trTiles.values()]);
+}
+
+function trTile(type) {
+  const c = el("div", "tile trtile"), pv = el("div", "trprev"), a = el("div", "a", "A"), b = el("div", "b", "B"), o = el("div", "o");
+  pv.append(a, b, o);
+  c.append(pv, el("span", "mname", type));
+  c.title = `${type} (transitions/${type}.js)\nDrag onto a cut or a scene seam (between the two), the left half of a clip or scene (in), or its right half (out).\nClick: use it for the selected transition.`;
+  c.draggable = true;
+  c.ondragstart = (e) => {
+    e.dataTransfer.setData(DRAG_TR, type);
+    e.dataTransfer.effectAllowed = "copy";
+  };
+  c.onclick = () => {
+    const st = selTransition();
+    if (!st) return toast("Drag it onto the timeline, or select a transition first.");
+    const x = { ...st.x, type };
+    if (st.x.type !== type) delete x.dir; // another type has other directions
+    st.set(x);
+  };
+  let f = null, raf = 0;
+  const show = (p) => {
+    const s = f?.(p, {}) ?? {};
+    for (const [n, st] of [[a, s.a], [b, s.b], [o, s.over ?? { display: "none" }]]) { n.style.cssText = ""; Object.assign(n.style, st ?? {}); }
+  };
+  import(`/tr/${type}.js?v=${Date.now()}`).then((m) => { f = m.default; show(0.5); }).catch(() => {});
+  // hover: 1.2 s of transition (ease in-out), a short hold on B, again
+  c.onmouseenter = () => {
+    const t0 = performance.now();
+    const tick = (now) => {
+      const q = Math.min(1, (((now - t0) / 1200) % 1.5));
+      show(q < 0.5 ? 4 * q ** 3 : 1 - (-2 * q + 2) ** 3 / 2);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  };
+  c.onmouseleave = () => { cancelAnimationFrame(raf); show(0.5); };
+  return c;
+}

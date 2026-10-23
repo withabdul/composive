@@ -8,20 +8,54 @@ import { normalize } from "../canvas/stage.js";
 
 export const SCENE = /^\d{3}-[a-z0-9][a-z0-9-]*$/; // folder name of a scene, e.g. 001-hook
 export const isGlobal = (tr) => tr.id.startsWith("G");
-const end = (tl) => Math.max(0, ...tl.tracks.flatMap((t) => t.clips.map((c) => c.start + c.duration)));
+export const end = (tl) => Math.max(0, ...(tl.tracks ?? []).flatMap((t) => (t.clips ?? []).map((c) => c.start + c.duration)));
 const round = (t) => Math.round(t * 1e6) / 1e6; // 0.1 + 0.2 must not be saved as 0.30000000000000004
+
+// Fields of a scene's timeline.json that the view timeline does not hold (split leaves them out).
+export function withSceneFields(scene, old) {
+  for (const k of ["transition", "out"]) if (old?.[k]) scene[k] = old[k];
+  return scene;
+}
+
+// Where each scene is in video time: [{ slug, a, b, x, in, out }], each transition with the duration used.
+// A scene's `transition` ({ type, duration, ease, ... }) after another scene is x: the scene starts `duration`
+// earlier, over the end of the scene before (never longer than this scene, nor than the part of the scene
+// before that its own transition leaves). On the first scene, or with `only: true`, it is `in` instead: no
+// overlap, it plays over the start of this scene only. `out` plays over the end of this scene, unless the
+// next scene's x uses that seam. len(s) = the length of scene s (default: the end of its last clip).
+export function layout(p, len = (s) => end(s.timeline)) {
+  let t = 0, free = 0;
+  const L = p.scenes.map((s, i) => {
+    const l = len(s), x = s.timeline.transition, o = s.timeline.out, pair = x?.type && i && !x.only;
+    const d = pair ? Math.max(0, Math.min(x.duration ?? 0.6, l, t - free)) : 0;
+    const a = round(t - d);
+    free = t;
+    t = round(a + l);
+    const solo = (y) => (y?.type ? { ...y, duration: Math.min(y.duration ?? 0.6, l) } : null);
+    return { slug: s.slug, a, b: t, x: d > 0 ? { ...x, duration: d } : null, in: pair ? null : solo(x), out: solo(o) };
+  });
+  L.forEach((w, i) => { if (L[i + 1]?.x) w.out = null; });
+  return L;
+}
 
 // p = { timeline, scenes: [{ slug, timeline }] } (the /api/project answer).
 // slug: that scene and the global tracks; no slug: every scene (track ids "001-hook/V1") and the global tracks.
 // a, b = the time window of that scene (or of the whole video) in video time.
+// tl.transitions lists the scene transitions { ...x, a, b, from, to } (both views); from = null: an `in` of
+// scene `to` alone, to = null: an `out` of scene `from` alone. tl.view is the scene shown.
 export function compose(p, slug) {
   const tl = normalize(structuredClone(p.timeline));
   for (const tr of tl.tracks) if (!isGlobal(tr)) tr.id = "G" + tr.id;
-  const own = [];
-  let t = 0, a = 0, b = 0;
-  for (const s of p.scenes) {
-    const st = normalize(structuredClone(s.timeline)), o = t;
-    t += end(st);
+  const own = [], L = layout(p);
+  tl.transitions = L.flatMap((w, i) => [
+    ...(w.x ? [{ ...w.x, a: w.a, b: L[i - 1].b, from: L[i - 1].slug, to: w.slug }] : []),
+    ...(w.in ? [{ ...w.in, a: w.a, b: w.a + w.in.duration, from: null, to: w.slug }] : []),
+    ...(w.out ? [{ ...w.out, a: w.b - w.out.duration, b: w.b, from: w.slug, to: null }] : []),
+  ]);
+  tl.view = slug;
+  let a = 0, b = 0;
+  for (const [i, s] of p.scenes.entries()) {
+    const st = normalize(structuredClone(s.timeline)), o = L[i].a, t = L[i].b;
     if (slug && slug !== s.slug) continue;
     for (const c of st.tracks.flatMap((tr) => tr.clips)) c.start = round(c.start + o);
     if (slug) {
@@ -30,7 +64,7 @@ export function compose(p, slug) {
     } else for (const tr of st.tracks) tr.id = `${s.slug}/${tr.id}`;
     own.push(...st.tracks);
   }
-  if (!slug) b = t;
+  if (!slug) b = L.at(-1)?.b ?? 0;
   if (!tl.markers?.length) delete tl.markers;
   tl.tracks = [...own, ...tl.tracks];
   return { tl, a, b };

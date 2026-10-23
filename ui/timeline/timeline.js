@@ -1,8 +1,9 @@
 // Timeline: drawing (ruler, range, rows, clips, waveform, filmstrip, fades) and pointer interaction for the four tools.
-import { $, S, bus, redraw, el, clamp, kind, clipKind, DRAG_SRC, clips, findClip, trackOf, locked, withLinked, isSel, selIds, selected, setSel, snap, totalDur, stage, LABEL, ROW, MIN, EPS } from "../core/state.js";
+import { $, S, bus, redraw, el, toast, clamp, kind, clipKind, DRAG_SRC, DRAG_TR, selectTransition, clips, findClip, trackOf, locked, withLinked, isSel, selIds, selected, setSel, snap, totalDur, stage, LABEL, ROW, MIN, EPS } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, toggleGlobal, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt } from "../core/edit.js";
-import { isGlobal } from "../core/project.js";
+import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, toggleGlobal, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt, sceneTransition, setClipTransition, selTransition } from "../core/edit.js";
+import { isGlobal, layout, end } from "../core/project.js";
+import { clipTransitions } from "../canvas/stage.js";
 import { seek, ui } from "../canvas/viewer.js";
 import { strip, FRAME_H } from "./filmstrip.js";
 
@@ -77,6 +78,8 @@ function drawTimeline() {
   shade[1].style.left = LABEL + S.win.b * S.pps + "px";
   shade[1].style.width = Math.max(0, dur - S.win.b) * S.pps + "px";
 
+  drawSceneBar();
+
   const rows = $("#rows");
   rows.innerHTML = "";
   const solo = S.tl.tracks.some((t) => t.type === "audio" && t.solo);
@@ -91,6 +94,13 @@ function drawTimeline() {
     row.style.height = ROW[tr.type] + "px";
     row.append(header(tr));
     for (const c of tr.clips) if (c.start < view.b && c.start + c.duration > view.a) row.append(clipEl(c, view, tr));
+    if (tr.type !== "audio") for (const x of clipTransitions(tr)) {
+      if (x.a >= view.b || x.b <= view.a) continue;
+      const [c, side] = x.to ? [x.to, "in"] : [x.from, "out"];
+      const b = trBlock(x.x, x.a, x.b, S.trSel?.kind === "clip" && S.trSel.id === c.id && S.trSel.side === side, tr.lock);
+      Object.assign(b.dataset, { id: c.id, side, mode: x.from && x.to ? "cut" : side });
+      row.append(b);
+    }
     rows.append(row);
   }
   const filler = el("div", "row filler"); // fills the space below the last track, header column included
@@ -98,6 +108,45 @@ function drawTimeline() {
   rows.append(filler);
   [cvCache, cvNext] = [cvNext, new Map()];
   ui();
+}
+
+// Where the scenes are now: the scene shown uses its live length (its timeline.json is saved a bit later).
+const sceneLayout = () => layout(S.project, (s) => (s.slug === S.scene ? S.win.b - S.win.a : end(s.timeline)));
+
+// A transition block from a to b (video time); dataset a, b for the duration drag.
+function trBlock(x, a, b, sel, ro) {
+  const d = el("div", "trb" + (sel ? " sel" : "") + (ro ? " ro" : ""), x.type);
+  d.style.left = LABEL + a * S.pps + "px";
+  d.style.width = Math.max(4, (b - a) * S.pps) + "px";
+  Object.assign(d.dataset, { a, b });
+  d.title = `${x.type} ${(b - a).toFixed(2)} s\nClick: select (right panel). Drag: duration. Delete or right-click: remove.`;
+  return d;
+}
+
+// Scene bar: a block per scene (double-click opens it), the scene transitions: on the seams (between two
+// scenes), at the start (in, alone) or at the end (out) of a scene.
+function drawSceneBar() {
+  const bar = $("#scenebar");
+  bar.hidden = !S.project.scenes.length;
+  bar.replaceChildren(el("div", "corner", "Scenes"));
+  const L = sceneLayout();
+  L.forEach((w, i) => {
+    const s = el("div", "sblk" + (w.slug === S.scene ? " on" : ""), w.slug);
+    s.dataset.scene = w.slug;
+    s.style.left = LABEL + w.a * S.pps + "px";
+    s.style.width = Math.max(0, w.b - w.a) * S.pps + "px";
+    s.title = `${w.slug}\nDouble-click: open this scene`;
+    bar.append(s);
+    const sel = (side) => S.trSel?.kind === "scene" && S.trSel.slug === w.slug && S.trSel.side === side;
+    const add = (x, a, b, side, mode) => {
+      const blk = trBlock(x, a, b, sel(side));
+      Object.assign(blk.dataset, { scene: w.slug, side, mode });
+      bar.append(blk);
+    };
+    if (w.x) add(w.x, w.a, L[i - 1].b, "in", "seam");
+    if (w.in) add(w.in, w.a, w.a + w.in.duration, "in", "in");
+    if (w.out) add(w.out, w.b - w.out.duration, w.b, "out", "out");
+  });
 }
 
 const ICON = {
@@ -263,6 +312,8 @@ sc.addEventListener("pointerdown", (e) => {
     S.drag = { type: "pan", x: e.clientX, y: e.clientY, sl: sc.scrollLeft, st: sc.scrollTop };
     return;
   }
+  const tb = e.target.closest(".trb");
+  if (tb) return trDown(tb, e);
   const mk = e.target.closest(".mk");
   if (mk) {
     const m = S.tl.markers.find((x) => x.id === mk.dataset.id);
@@ -272,7 +323,7 @@ sc.addEventListener("pointerdown", (e) => {
   }
   const node = e.target.closest(".clip");
   if (!node) {
-    if (e.target.closest("#ruler")) {
+    if (e.target.closest("#ruler, #scenebar")) {
       seek(timeAt(e.clientX));
       S.drag = { type: "scrub" };
       return;
@@ -330,6 +381,7 @@ sc.addEventListener("pointermove", (e) => {
     return;
   }
   if (d.type === "scrub") return seek(timeAt(e.clientX));
+  if (d.type === "trdur") return trMove(d, e);
   if (d.type === "box") return boxSelect(d, e);
   if (d.type === "kf") { // keys at d.kt move together, on whole frames, inside the clip
     if (!d.moved && Math.abs(e.clientX - d.x) < 3) return;
@@ -449,6 +501,92 @@ sc.addEventListener("pointermove", (e) => {
   commit();
 });
 
+/* ---------- transitions: select, duration drag, drop from the sidebar ---------- */
+
+// A click selects the transition; a drag changes its duration. The pointer's side of a cut sets the way:
+// right of the middle, a move right makes it longer (both sides grow); an in grows right, an out and a
+// transition on a scene seam grow left.
+const trOf = (tb) => tb.dataset.scene ? { kind: "scene", slug: tb.dataset.scene, side: tb.dataset.side } : { kind: "clip", id: tb.dataset.id, side: tb.dataset.side };
+function trDown(tb, e) {
+  const t = trOf(tb);
+  selectTransition(t);
+  const st = selTransition();
+  if (st && !tb.classList.contains("ro")) {
+    const a = +tb.dataset.a, b = +tb.dataset.b, mode = tb.dataset.mode;
+    const k = mode === "cut" ? (timeAt(e.clientX) > (a + b) / 2 ? 2 : -2) : mode === "in" ? 1 : -1;
+    S.drag = { type: "trdur", t, k, mode, d0: b - a, a, b, x0: st.x, x: e.clientX, moved: false, snap: JSON.stringify(S.tl) };
+  }
+  redraw();
+}
+
+function trMove(d, e) {
+  if (!d.moved && Math.abs(e.clientX - d.x) < 3) return;
+  d.moved = true;
+  d.dur = Math.max(MIN, snap(d.d0 + d.k * (e.clientX - d.x) / S.pps));
+  if (d.t.kind === "scene") { // only drawn now; set on release (it moves scene starts)
+    const b = $(`#scenebar .trb[data-scene="${d.t.slug}"][data-side="${d.t.side}"]`);
+    if (b) {
+      b.style.left = LABEL + (d.mode === "in" ? d.a : d.b - d.dur) * S.pps + "px";
+      b.style.width = d.dur * S.pps + "px";
+      b.textContent = d.dur.toFixed(2) + " s";
+    }
+    return;
+  }
+  S.tl = JSON.parse(d.snap);
+  const c = findClip(d.t.id);
+  if (c) c[d.t.side] = { ...d.x0, duration: d.dur };
+  commit();
+}
+
+// What a transition dropped at the pointer goes on, for a scene (scene bar) or a clip: on a seam or a cut
+// (8 px around it): the transition between the two (pair: the next one's "in"); on the left half: "in" (only
+// this one when there is one before it); on the right half: "out" (only this one). t = where the line shows.
+function trTarget(e) {
+  const t = timeAt(e.clientX), near = (s) => Math.abs(s - t) * S.pps < 8;
+  if (document.elementFromPoint(e.clientX, e.clientY)?.closest("#scenebar")) {
+    const L = sceneLayout(), i = L.findIndex((w, i) => i && near(L[i - 1].b));
+    if (i > 0) return { kind: "scene", slug: L[i].slug, side: "in", t: L[i - 1].b, pair: true };
+    const w = L.findLast((w) => t >= w.a && t < w.b); // the later scene is on top in an overlap
+    if (!w) return null;
+    return t - w.a < w.b - t ? { kind: "scene", slug: w.slug, side: "in", t: w.a, only: L.indexOf(w) > 0 }
+      : { kind: "scene", slug: w.slug, side: "out", t: w.b };
+  }
+  // the clip may be under a transition block
+  const c = findClip(document.elementsFromPoint(e.clientX, e.clientY).find((n) => n.classList.contains("clip"))?.dataset.id);
+  if (!c || locked(c) || trackOf(c).type === "audio") return null;
+  const e1 = c.start + c.duration, cs = trackOf(c).clips;
+  const prev = cs.find((x) => Math.abs(x.start + x.duration - c.start) < EPS), next = cs.find((x) => Math.abs(x.start - e1) < EPS);
+  if (prev && near(c.start)) return { kind: "clip", id: c.id, side: "in", t: c.start, pair: true };
+  if (next && near(e1)) return { kind: "clip", id: next.id, side: "in", t: e1, pair: true };
+  return t - c.start < e1 - t ? { kind: "clip", id: c.id, side: "in", t: c.start, only: !!prev }
+    : { kind: "clip", id: c.id, side: "out", t: e1 };
+}
+
+function trDrop(e, type) {
+  const g = trTarget(e);
+  if (!g) return;
+  const old = g.kind === "scene" ? S.project.scenes.find((s) => s.slug === g.slug)?.timeline[g.side === "out" ? "out" : "transition"]
+    : findClip(g.id)[g.side];
+  const x = { duration: 0.6, ease: "inout", ...old, type };
+  if (old?.type !== type) { delete x.dir; delete x.color; } // another type has other options
+  if (g.only) x.only = true; else delete x.only;
+  const t = { kind: g.kind, id: g.id, slug: g.slug, side: g.side };
+  selectTransition(t);
+  if (g.kind === "scene") sceneTransition(g.slug, x, g.side);
+  else setClipTransition(findClip(g.id), g.side, x);
+  if (g.side === "out" && pairAfter(g)) toast("Not used: the next one has a transition on this cut. Remove it, or set it to only.");
+}
+
+// does the next clip or scene use the cut or seam at the end of this one (an `in` that is not `only`)?
+function pairAfter(g) {
+  if (g.kind === "scene") {
+    const L = sceneLayout();
+    return !!L[L.findIndex((w) => w.slug === g.slug) + 1]?.x;
+  }
+  const c = findClip(g.id), e1 = c.start + c.duration;
+  return trackOf(c).clips.some((x) => Math.abs(x.start - e1) < EPS && x.in?.type && !x.in.only);
+}
+
 function boxSelect(d, e) {
   const r = inner.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   if (!d.moved && Math.hypot(x - d.x, y - d.y) < 4) return;
@@ -466,6 +604,7 @@ function boxSelect(d, e) {
 
 sc.addEventListener("pointerup", (e) => {
   const d = S.drag;
+  if (d?.type === "trdur" && d.moved && d.t.kind === "scene") sceneTransition(d.t.slug, { ...d.x0, duration: d.dur }, d.t.side);
   if (d?.type === "marker") {
     if (d.moved) S.tl.markers.sort((a, b) => a.t - b.t);
     else seek(d.t0); // a click on a marker goes there
@@ -499,8 +638,13 @@ const markerAt = (e) => document.elementFromPoint(e.clientX, e.clientY)?.closest
 
 sc.addEventListener("contextmenu", (e) => {
   const at = document.elementFromPoint(e.clientX, e.clientY);
-  const mk = at?.closest(".mk"), kf = at?.closest(".kf");
-  if (mk) removeMarker(mk.dataset.id);
+  const mk = at?.closest(".mk"), kf = at?.closest(".kf"), tb = at?.closest(".trb:not(.ro)");
+  if (tb) {
+    S.trSel = trOf(tb);
+    selTransition()?.set(null);
+    S.trSel = null;
+    redraw();
+  } else if (mk) removeMarker(mk.dataset.id);
   else if (kf) removeKeysAt(findClip(kf.closest(".clip").dataset.id), Number(kf.dataset.kt));
   else return;
   e.preventDefault();
@@ -508,6 +652,13 @@ sc.addEventListener("contextmenu", (e) => {
 
 // double-click: a small box under the marker with its name, color and Delete
 sc.addEventListener("dblclick", (e) => {
+  const blk = document.elementFromPoint(e.clientX, e.clientY)?.closest(".sblk");
+  if (blk && blk.dataset.scene !== S.scene) { // open that scene, as the top bar list does
+    const pick = $("#scenePick");
+    pick.value = blk.dataset.scene;
+    pick.dispatchEvent(new Event("change"));
+    return;
+  }
   const mk = markerAt(e);
   if (!mk) return;
   const m = S.tl.markers.find((x) => x.id === mk.dataset.id), q = mk.getBoundingClientRect();
@@ -543,6 +694,15 @@ sc.addEventListener("dblclick", (e) => {
 const rowAt = (e) => document.elementFromPoint(e.clientX, e.clientY)?.closest(".row");
 const clearDrop = () => { $("#rows .row.droptarget")?.classList.remove("droptarget"); snapLine.hidden = true; };
 sc.addEventListener("dragover", (e) => {
+  if (e.dataTransfer.types.includes(DRAG_TR)) { // a transition: the snap line shows where it goes
+    const g = trTarget(e);
+    snapLine.hidden = !g;
+    if (!g) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    snapLine.style.left = LABEL + g.t * S.pps + "px";
+    return;
+  }
   if (!e.dataTransfer.types.includes(DRAG_SRC)) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = "copy";
@@ -553,6 +713,8 @@ sc.addEventListener("dragover", (e) => {
 });
 sc.addEventListener("dragleave", (e) => { if (!sc.contains(e.relatedTarget)) clearDrop(); });
 sc.addEventListener("drop", (e) => {
+  const type = e.dataTransfer.getData(DRAG_TR);
+  if (type) { e.preventDefault(); clearDrop(); S.focus = "timeline"; return trDrop(e, type); }
   const src = e.dataTransfer.getData(DRAG_SRC);
   if (!src) return;
   e.preventDefault();

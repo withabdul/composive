@@ -11,8 +11,7 @@
   <b>composive</b>
   <input id="folder" disabled title="Project folder">
   <select id="scenePick" title="Scene shown on the timeline"></select>
-  <button id="addScene" tabindex="-1" title="New scene: a folder scenes/###-name after the last scene">+ Scene</button>
-  <code id="scenePath">-</code>
+  <button id="addScene" tabindex="-1" title="New scene: a folder scenes/###-name after the last scene">+ Scene</button>  <code id="scenePath">-</code>
   <span id="exportInfo"></span>
   <button id="exportBtn" tabindex="-1" title="Export a video to exports/">Export</button>
 </header>
@@ -26,6 +25,8 @@
     <div id="scenes"></div>
     <h4 class="sechead">Templates</h4>
     <div id="templates" title="templates/<slug>/. Click: add at the playhead. Drag: drop on the timeline."></div>
+    <h4 class="sechead">Transitions</h4>
+    <div id="transitions" title="transitions/<type>.js. Drag onto a cut or a scene seam (between the two), the left half of a clip or scene (in), or its right half (out)."></div>
   </section>
   <section data-pane="media" hidden>
     <div id="drop">
@@ -95,7 +96,7 @@
     </label>
   </div>
   <div id="tlscroll">
-    <div id="tlinner"><div id="ruler"></div><div id="rows"></div><div id="playhead"></div><div id="snapline" hidden></div><div id="marquee" hidden></div></div>
+    <div id="tlinner"><div id="ruler"></div><div id="scenebar"></div><div id="rows"></div><div id="playhead"></div><div id="snapline" hidden></div><div id="marquee" hidden></div></div>
   </div>
 </section>
 
