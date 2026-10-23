@@ -93,7 +93,7 @@ export function serve(dir: string, port = 9999) {
   watch(root, { recursive: true }, (_, name) => {
     if (!name) return;
     const n = name.replaceAll("\\", "/");
-    if (/^(\.git|node_modules|exports)(\/|$)/.test(n)) return; // exports/: a video being written
+    if (/^(\.git|node_modules|exports|preview)(\/|$)/.test(n)) return; // exports/: a video being written, preview/: composive frame
     clearTimeout(timers.get(n));
     timers.set(n, setTimeout(async () => {
       const p = join(root, n);
@@ -251,7 +251,7 @@ export function serve(dir: string, port = 9999) {
               clips: files.map((p) => p.match(new RegExp(`^scenes/${slug}/([^/]+)/index\\.html$`)))
                 .filter(Boolean).map((m) => ({ name: m![1], path: m![0] })),
             }))),
-            media: files.filter((p) => MEDIA.test(p) && !p.startsWith("exports/")),
+            media: files.filter((p) => MEDIA.test(p) && !/^(exports|preview)\//.test(p)),
             templates: await templates(),
             transitions: existsSync(TRANSITIONS)
               ? readdirSync(TRANSITIONS).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3)).sort() : [],

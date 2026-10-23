@@ -13,6 +13,11 @@ const CHROMES = [
   "/usr/bin/google-chrome",
   "/usr/bin/chromium",
 ];
+export function chrome() {
+  const exe = CHROMES.find((p) => p && existsSync(p));
+  if (!exe) throw new Error("Chrome not found. Set CHROME_PATH.");
+  return exe;
+}
 // Chrome processes that render frames at the same time: more = faster, but more CPU and RAM
 export const PERF = { low: 1, normal: 4, fast: 8 } as const;
 export type Perf = keyof typeof PERF;
@@ -23,8 +28,7 @@ export type Perf = keyof typeof PERF;
 type Opts = { port?: number; onFrame?: (i: number, n: number) => void; signal?: AbortSignal; perf?: Perf };
 export async function exportVideo(dir: string, out: string, scene?: string, { port, onFrame, signal, perf = "normal" }: Opts = {}) {
   const PAGES = PERF[perf];
-  const exe = CHROMES.find((p) => p && existsSync(p));
-  if (!exe) throw new Error("Chrome not found. Set CHROME_PATH.");
+  const exe = chrome();
 
   const server = port ? { port, stop() {} } : serve(dir, 0);
   const project = await (await fetch(`http://localhost:${server.port}/api/project`)).json();

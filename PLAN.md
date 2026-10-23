@@ -59,6 +59,13 @@ Decisions already made:
       switches scenes, `+ Scene` makes one; global tracks (`G` ids) in the root `timeline.json` under every scene;
       "All scenes" view; undo per scene; `export --scene`. `example` moved, `video-ai-15min` removed.
 
+## AI loop (the AI edits files and must check its own work without a browser)
+
+- [x] Step A: `composive check <project> [--json]`: errors and warnings by file, exit code 1 on an error.
+- [x] Step B: `composive frame <project> --at 1,2.5 | --sheet N [--scene 001-hook] [-o f.png] [--json]`; lists
+      page errors (also a `seek` that throws: stage.js now logs it once per clip and message instead of hiding it).
+- [ ] Step C (later): a guide for the AI (AGENTS.md or a skill).
+
 ## Now
 
 - [ ] Scenes: test in the browser (switch, edit global from a scene, undo per scene, `+ Scene`, export both ways).

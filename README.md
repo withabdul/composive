@@ -8,12 +8,55 @@ bun bin/composive.ts dev example            # editor at http://localhost:9999, l
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
 bun bin/composive.ts export example --fast-perf   # 8 Chrome processes render at once (default 4, --low-perf = 1): faster, more CPU and RAM
+bun bin/composive.ts check example                # find what breaks the editor or the export (--json for tools)
+bun bin/composive.ts frame example --at 2         # one frame as PNG (in projects/example/preview/frames), as the export draws it
+bun bin/composive.ts frame example --sheet 12     # 12 frames in one image, with time labels
 ```
 
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
 `example` is a small demo.
+
+## Check a project
+
+`composive check <project>` reads the files (no server, no browser) and lists problems by file. Exit code 1
+when there is an error, so a script or an AI can run it after each edit. `--json` prints
+`{ project, errors, warnings, issues: [{ level, file, at, msg }] }` (`at` = track and clip, e.g. `V1 clip 2 (c1)`).
+
+- Errors (the editor or the export breaks): invalid JSON, a missing `src`, template or transition type, an
+  unsupported file type, clips that overlap on a track, a bad `start` / `duration` / `offset` / `volume`, an
+  audio file on a video track (or an HTML clip or image on an audio track), a scene track id that starts with
+  `G`, two tracks with one id, a bad transition `ease` / `dir` / `color`, unsorted keys or a bad key `ease`,
+  an HTML clip that never sets `window.seek`, `composive.clip` without `/lib/composive.js`, `timeline`
+  without GSAP.
+- Warnings (it plays, but likely not as meant): a clip longer than its media (ffprobe), a prop or key not in
+  the clip's defaults (a typo), keys that mix numbers and colors, a transition cut short by the clip or scene
+  length, a scene folder name that is skipped, an empty scene, a `link` with one clip, a `range` after the end;
+  in HTML clips: timers or `requestAnimationFrame`, `gsap.to()` outside `tl`, `Math.random` / `Date.now`
+  (each export worker loads the page on its own, so frames can differ), CSS `translate` / `scale` / `rotate`
+  with GSAP, files loaded from the internet.
+
+The HTML checks read the source text, so they can miss a problem or flag code that is fine.
+
+## Look at frames
+
+`composive frame <project>` draws frames with the export renderer (Chrome, no editor), so they are the frames
+the export writes. It takes a few seconds; no `dev` server is needed.
+
+- Files go to `<project>/preview/frames/` (not in git, not in Media, no live reload), named
+  `frame-<nn>-at-<time>s.png` (`nn` = the place in `--at`, from 00), e.g. `frame-01-at-5.15s.png`, or
+  `scene-<slug>-at-<time>s.png` with `--scene`, e.g. `scene-003-logo-at-0.5s.png`. `-o f.png` writes there
+  instead (several times: `f-<time>s.png` next to it).
+- `--at 1,2.5,4`: those times (default 0).
+- `--sheet N` (1 to 48): N frames spread from the first to the last frame, in one image about 1600 px wide,
+  each labeled with its time (and its scene, for the whole video), named `frame-sheet.png` or
+  `scene-<slug>-sheet.png`.
+- `--scene 001-hook`: that scene with the global tracks under it, times from the scene start (as in its
+  `timeline.json`). Without it, times are video time.
+- After the files it lists what went wrong in the page: a script error in a clip (with its file and line),
+  a `seek` that throws (with its time), a file that does not load (404). `--json` prints
+  `{ written, times, label, problems }`.
 
 ## Export from the editor
 
