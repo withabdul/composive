@@ -58,18 +58,22 @@ function fromJson(j: any): Word[][] {
   return [words];
 }
 
-// Lines of at most `max` words; a new line also after a sentence end or a pause of more than `gap` seconds.
+// Lines of at most `max` words. A sentence end or a pause of more than `gap` seconds always ends a line;
+// a longer part between them is cut into lines of near equal size (7 words, max 3: 3 + 2 + 2, not 3 + 3 + 1).
 function lines(groups: Word[][], max: number, gap = 0.5) {
   const out: { t: number; e: number; words: Word[] }[] = [];
   for (const g of groups) {
-    let line: Word[] = [];
+    let part: Word[] = [];
     g.forEach((w, i) => {
-      line.push(w);
+      part.push(w);
       const next = g[i + 1];
-      if (!next || line.length >= max || /[.!?…]["')\]]*$/.test(w.w) || next.t - w.e > gap) {
-        out.push({ t: line[0].t, e: line.at(-1)!.e, words: line });
-        line = [];
+      if (next && !/[.!?…]["')\]]*$/.test(w.w) && next.t - w.e <= gap) return;
+      const n = Math.ceil(part.length / max);
+      for (let k = 0, at = 0; k < n; k++) {
+        const len = Math.floor(part.length / n) + (k < part.length % n ? 1 : 0), words = part.slice(at, (at += len));
+        out.push({ t: words[0].t, e: words.at(-1)!.e, words });
       }
+      part = [];
     });
   }
   return out;

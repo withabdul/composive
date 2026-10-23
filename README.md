@@ -239,8 +239,9 @@ clip starts). One caption line per text line, so a wrong word is easy to fix by 
   shares a line with the next one), or ElevenLabs JSON: text to speech "with timestamps"
   (`alignment.characters` + `character_start_times_seconds` / `character_end_times_seconds`), forced alignment
   or speech to text (`words: [{ text, start, end, type }]`; spacing and audio events are skipped).
-- Lines: at most `--words N` words (default 7; 3 with `--style captions-tiktok`), and a new line after `.`, `!`,
-  `?` or a pause of more than 0.5 s. A line shows from its first word until the next line, at most 0.6 s after
+- Lines: at most `--words N` words (default 10; 3 with `--style captions-tiktok`). A line always ends after
+  `.`, `!`, `?` or a pause of more than 0.5 s; a longer part is cut into lines of near equal size (7 words,
+  `--words 3`: 3 + 2 + 2). A line shows from its first word until the next line, at most 0.6 s after
   its last word.
 - `-o media/x.captions.json`: another file name (inside the project).
 - `--add`: also puts a clip (`--style captions` or `captions-tiktok`, default `captions`) on a new top track
