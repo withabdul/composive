@@ -66,6 +66,19 @@ Decisions already made:
       page errors (also a `seek` that throws: stage.js now logs it once per clip and message instead of hiding it).
 - [ ] Step C (later): a guide for the AI (AGENTS.md or a skill).
 
+## Content features
+
+- [x] Sizes: `composive new <name> --preset youtube|reels|square|portrait|4k [--fps]`; size button and dialog
+      in the editor (preset or custom, fps, one undo step); `check` flags an odd width or height.
+- [x] Captions: `composive captions <srt|vtt|json> [--add]` -> `media/<name>.captions.json`; templates
+      `@captions` (classic) and `@captions-tiktok` (word highlight, pop); runtime `composive.captions` /
+      `captionAt`; `check` reads the file; the editor reloads scenes when a .json changes.
+- [ ] Captions later: more styles; drop an .srt / alignment JSON in the editor; a word editor in the panel.
+- [x] Audio: `keys.volume` (panel ◆), ducking (`track.duck` gain under `track.voice` tracks); one gain
+      envelope (`stage.js envelope()`) for preview (WebAudio ramps) and export (chained ffmpeg volume
+      expressions, at most 16 lines each: a long expression fails to parse); gain line on audio clips.
+- [ ] Audio later: ducking by the voice's sound (sidechain), duck fade and hold as settings.
+
 ## Now
 
 - [ ] Scenes: test in the browser (switch, edit global from a scene, undo per scene, `+ Scene`, export both ways).

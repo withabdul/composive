@@ -4,6 +4,7 @@ Minimal video editor: HTML scenes + `timeline.json`. An AI edits the files, the 
 
 ```
 bun install
+bun bin/composive.ts new my-reel --preset reels  # an empty project in projects/my-reel, 1080x1920
 bun bin/composive.ts dev example            # editor at http://localhost:9999, live-reloads on file change
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
@@ -17,6 +18,24 @@ Projects live in `projects/`; a bare name like `example` means `projects/example
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
 `example` is a small demo.
+
+## Video size
+
+`composive new <name> [--preset <id>] [--fps 30]` makes `projects/<name>` (a path works too; the folder must
+be empty or new) with one scene `001-main` (track `V1`), a music track `GA1` and `media/`.
+
+| preset | size | for |
+|---|---|---|
+| `youtube` (default) | 1920x1080 | YouTube, 16:9 |
+| `reels` | 1080x1920 | Reels / TikTok / Shorts, 9:16 |
+| `square` | 1080x1080 | 1:1 |
+| `portrait` | 1080x1350 | Instagram feed, 4:5 |
+| `4k` | 3840x2160 | 4K, 16:9 |
+
+In the editor, the size button in the top bar (e.g. `1080×1920 · 30 fps`) opens a dialog: a preset or a
+custom width and height (rounded to even numbers: the H.264 export needs them), and the frame rate. It is one
+undo step. Clip `x` / `y` are fractions of the frame, so clips keep their place; HTML clips draw at the new
+size, so a clip made for 16:9 may need changes for 9:16 (check it with `composive frame`).
 
 ## Check a project
 
@@ -82,6 +101,7 @@ Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes beco
 ```
 app.js            startup, shortcuts, live reload
 export.js         Export button: dialog, progress, cancel (renders on the server into exports/)
+format.js         size button: frame size (presets in core/project.js) and fps
 core/             state.js shared state and helpers, history.js undo stacks (one for the project),
                   edit.js every timeline change plus undo/redo and save,
                   project.js scenes <-> one timeline (shared with export)
@@ -163,7 +183,7 @@ the clip's props, draws the first frame on load, and fades the page. GSAP is ser
 - Never use the CSS `translate`, `scale` or `rotate` properties on an element GSAP animates: GSAP moves them
   into its own transform and they are lost when the timeline is built again (the element jumps).
 - Helpers: `composive.range(t, start, len)` (0..1 progress), `composive.ease.in|out|inout|linear`,
-  `composive.clamp(v, a, b)`, `composive.props` (the defaults).
+  `composive.clamp(v, a, b)`, `composive.props` (the defaults), `composive.captions` / `captionAt` (see Captions).
 - `tl.timeScale()` has no effect (the runtime sets the time). Speed ramps:
   - one tween: a GSAP ease, `ease: "expo.inOut"`;
   - a custom speed curve: load `/lib/gsap/CustomEase.min.js`, then `CustomEase.create("ramp", "M0,0 C0.7,0 0.3,1 1,1")`
@@ -197,6 +217,39 @@ playhead, drag drops it on the timeline. It goes on the top video track, or on t
 - `@shape`: `color`, `w`, `h` (fractions of the frame), `round` (0 = rectangle, 1 = ellipse), `opacity`, `x`, `y`
 - `@lower` (lower third): `title`, `sub`, `color`, `accent`, `size`, `x`, `y` (top-left corner)
 - `@solid` (fills the frame): `color`, `opacity`
+- `@captions` (classic subtitles, one line on a box): `file`, `size`, `color`, `bg`, `bgOpacity`, `weight`, `font`, `width`, `x`, `y`
+- `@captions-tiktok` (big bold words, the word spoken now highlighted and popped): `file`, `size`, `color`,
+  `highlight`, `stroke`, `upper`, `pop`, `font`, `width`, `x`, `y`
+
+## Captions
+
+`composive captions <file> [-p project]` turns subtitles or word times into `<project>/media/<name>.captions.json`,
+which the `@captions*` templates read (`props.file`):
+
+```json
+{ "lines": [
+  { "t": 0.2, "e": 1.16, "words": [{ "w": "Halo", "t": 0.2, "e": 0.48 }, { "w": "semua,", "t": 0.48, "e": 0.88 }] }
+] }
+```
+
+Times are seconds from the clip start (so from the start of the voice: put the caption clip where the voice
+clip starts). One caption line per text line, so a wrong word is easy to fix by hand; the editor reloads it.
+
+- Input: `.srt` or `.vtt` (a cue has no word times: its words share the cue time by their length; a cue never
+  shares a line with the next one), or ElevenLabs JSON: text to speech "with timestamps"
+  (`alignment.characters` + `character_start_times_seconds` / `character_end_times_seconds`), forced alignment
+  or speech to text (`words: [{ text, start, end, type }]`; spacing and audio events are skipped).
+- Lines: at most `--words N` words (default 10; 3 with `--style captions-tiktok`). A line always ends after
+  `.`, `!`, `?` or a pause of more than 0.5 s; a longer part is cut into lines of near equal size (7 words,
+  `--words 3`: 3 + 2 + 2). A line shows from its first word until the next line, at most 0.6 s after
+  its last word.
+- `-o media/x.captions.json`: another file name (inside the project).
+- `--add`: also puts a clip (`--style captions` or `captions-tiktok`, default `captions`) on a new top track
+  `Captions` of the first scene (`--scene 001-hook` for another), at `--at 0` seconds, as long as the captions.
+  Captions go on a scene, not on a global track: global video tracks are under every scene.
+- A new caption style is a template that loads `/lib/composive.js` and uses `composive.captions(p.file)`
+  (a promise of the file) and `composive.captionAt(cap, t)` (`{ line, index, word }` or null); `seek` may be
+  `async`.
 
 ## Scene transitions
 
@@ -301,6 +354,19 @@ track and clip format:
 - Video and image clips have `props` too: `x`, `y` (center, fractions of the frame, default 0.5), `scale` (1),
   `sx`, `sy` (stretch width / height on top of scale, 1), `rotation` (degrees, 0), `opacity` (0..1, 1).
   Preview and export both apply them.
+
+## Audio volume and ducking
+
+- `volume` can have keyframes like a prop: `"keys": { "volume": [{ "t": 0, "v": 0 }, { "t": 2, "v": 1, "ease": "inout" }] }`
+  (`t` = clip-local time, offset included). In the panel, `◆` next to volume adds a key at the playhead.
+- Ducking: an audio track with `"duck": 0.25` goes down to that gain (0.25 = about -12 dB) while a clip of an
+  audio track with `"voice": true` plays (mute and solo apply), 0.3 s down before the voice and 0.3 s up after.
+  Voice clips less than 1.2 s apart count as one stretch, so the music does not go up between two sentences.
+  In the panel's Track section: the `voice` box and the `duck` field (empty = off). It goes by the voice clips
+  on the timeline, not by the sound in them (a pause inside one voice clip keeps the music down).
+- The clip gain is volume (or its keys) x fadeIn / fadeOut x ducking, computed once (`envelope()` in
+  `ui/canvas/stage.js`) for the preview and the export. On an audio clip, a yellow line shows it when it is
+  not a plain 1.
 
 ## Editor
 

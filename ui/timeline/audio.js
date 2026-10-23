@@ -1,7 +1,7 @@
 // Audio: decode + waveform peaks, scheduled playback with fades, output level meter.
 // The audio clock drives playback time, see viewer.js.
 import { $, S, clamp, redraw } from "../core/state.js";
-import { audible } from "../canvas/stage.js";
+import { audible, envelope, gainAt } from "../canvas/stage.js";
 
 export const actx = new AudioContext();
 const master = actx.createGain();
@@ -38,11 +38,6 @@ function peaksOf(b) {
   return out;
 }
 
-function gainAt(c, x) {
-  const fi = c.fadeIn || 0, fo = c.fadeOut || 0;
-  return Math.min(1, fi ? x / fi : 1, fo ? (c.duration - x) / fo : 1);
-}
-
 export function startAudio(t0) {
   stopAudio();
   S.t0 = t0;
@@ -51,17 +46,13 @@ export function startAudio(t0) {
     const buf = S.bufs.get(c.src);
     if (!buf || c.start + c.duration <= t0) continue;
     const skip = Math.max(0, t0 - c.start), dur = c.duration - skip;
-    const when = S.ctxT0 + Math.max(0, c.start - t0), vol = c.volume ?? 1;
+    const when = S.ctxT0 + Math.max(0, c.start - t0);
     const src = actx.createBufferSource(), g = actx.createGain();
     src.buffer = buf;
-    g.gain.setValueAtTime(gainAt(c, skip) * vol, when);
-    const fi = c.fadeIn || 0, fo = c.fadeOut || 0;
-    if (fi > skip) g.gain.linearRampToValueAtTime(vol, when + fi - skip);
-    if (fo) {
-      const fs = c.duration - fo;
-      if (fs > skip) g.gain.setValueAtTime(vol, when + fs - skip);
-      g.gain.linearRampToValueAtTime(0, when + dur);
-    }
+    // volume, keyframes, fades and ducking: the same points the export uses (stage.js envelope)
+    const P = envelope(S.tl, c), from = c.start + skip, at = (t) => S.ctxT0 + t - t0;
+    g.gain.setValueAtTime(gainAt(P, from), when);
+    for (const p of P) if (p.t > from) g.gain.linearRampToValueAtTime(p.v, at(p.t));
     src.connect(g).connect(master);
     src.start(when, (c.offset || 0) + skip, dur);
     S.srcs.push(src);

@@ -1,5 +1,5 @@
 // All timeline mutations. Every change ends in commit(): re-sort, re-render, repaint, save.
-import { S, stage, bus, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast } from "./state.js";
+import { S, stage, bus, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast, clipKind } from "./state.js";
 import { H, record, snapshot as projectSnapshot } from "./history.js";
 import { split, compose, isGlobal, withSceneFields } from "./project.js";
 import { loadAudio, startAudio } from "../timeline/audio.js";
@@ -245,6 +245,15 @@ export function toggleTrack(id, key) {
   commit();
 }
 
+// ducking of an audio track: the gain it goes down to while a voice track plays (null = off). One undo step.
+export function setDuck(id, v) {
+  const tr = S.tl.tracks.find((t) => t.id === id);
+  if (!tr || (tr.duck ?? null) === v) return;
+  record();
+  if (v == null) delete tr.duck; else tr.duck = clamp(v, 0, 0.99);
+  commit();
+}
+
 export function renameTrack(id, name) {
   const tr = S.tl.tracks.find((t) => t.id === id);
   name = name.trim();
@@ -319,13 +328,18 @@ export const duplicateClip = (c) => duplicate(withLinked([c]));
 // clip-local time of timeline time t (the time keyframes use), on a whole frame
 export const localAt = (c, t = S.t) => snap(t) - c.start + (c.offset || 0);
 const keyAt = (ks, lt) => ks?.find((k) => Math.abs(k.t - lt) < EPS);
+// the fixed (not animated) value of a keyable value: an audio clip's volume is c.volume, the rest is in c.props
+function fixed(c, key, v) {
+  if (key === "volume" && clipKind(c) === "audio") c.volume = v;
+  else c.props = { ...c.props, [key]: v };
+}
 
 // Writes a prop at the playhead: into its keyframes when it has some (auto-key: a key there is
 // changed or added), else as the clip's fixed value. The caller commits.
 export function setProp(c, key, v) {
   if (typeof v === "number" && !Number.isFinite(v)) return; // NaN would be saved as null (e.g. resize of a 0-size box)
   const ks = c.keys?.[key];
-  if (!ks?.length) { c.props = { ...c.props, [key]: v }; return; }
+  if (!ks?.length) return fixed(c, key, v);
   const lt = localAt(c), k = keyAt(ks, lt);
   if (k) k.v = v;
   else { ks.push({ t: lt, v }); ks.sort((a, b) => a.t - b.t); }
@@ -341,7 +355,7 @@ export function toggleKey(c, key, now) {
     ks.splice(ks.indexOf(k), 1);
     if (!ks.length) {
       delete c.keys[key];
-      c.props = { ...c.props, [key]: k.v };
+      fixed(c, key, k.v);
     }
   }
   if (!Object.keys(c.keys).length) delete c.keys;
@@ -362,7 +376,7 @@ export function removeKeysAt(c, lt) {
   for (const [key, ks] of Object.entries(c.keys ?? {})) {
     const left = ks.filter((k) => Math.abs(k.t - lt) >= EPS);
     if (left.length) c.keys[key] = left;
-    else { c.props = { ...c.props, [key]: ks.find((k) => Math.abs(k.t - lt) < EPS).v }; delete c.keys[key]; }
+    else { fixed(c, key, ks.find((k) => Math.abs(k.t - lt) < EPS).v); delete c.keys[key]; }
   }
   if (c.keys && !Object.keys(c.keys).length) delete c.keys;
   commit();
@@ -417,6 +431,17 @@ export function clearRange() {
   if (!S.tl.range) return;
   record();
   delete S.tl.range;
+  commit();
+}
+
+/* ---------- frame size ---------- */
+
+// Frame size and fps of the whole video (the global timeline.json). Positions are fractions of the frame,
+// so clips keep their place; HTML clips draw at the new size.
+export function setFormat({ width, height, fps }) {
+  if (width === S.tl.width && height === S.tl.height && fps === S.tl.fps) return;
+  record();
+  Object.assign(S.tl, { width, height, fps });
   commit();
 }
 

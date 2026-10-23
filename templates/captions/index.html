@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Captions</title>
+<!-- Template captions ("@captions"): classic subtitles, one line at a time on a box. file = a .captions.json
+     of the project (composive captions makes it). x, y = the center of the line, as fractions of the frame;
+     width = the widest line, as a fraction of the frame width. -->
+<meta name="duration" content="4">
+<meta name="props" content='{"file":"","size":56,"color":"#ffffff","bg":"#000000","bgOpacity":0.6,"weight":600,"font":"system-ui, sans-serif","width":0.86,"x":0.5,"y":0.8}'>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #c { position: absolute; transform: translate(-50%, -50%); text-align: center; line-height: 1.25; }
+  #c span { padding: 0.08em 0.4em; border-radius: 0.2em; -webkit-box-decoration-break: clone; box-decoration-break: clone; white-space: pre-wrap; }
+  #c.empty span { opacity: .6; font-style: italic; }
+</style>
+<div id="c"><span></span></div>
+<script src="/lib/composive.js"></script>
+<script>
+  const c = document.getElementById("c"), s = c.firstChild;
+  const hex = (h, a) => `rgba(${[1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(",")},${a})`;
+  window.seek = async (t, _duration, p = composive.props) => {
+    const cap = await composive.captions(p.file);
+    const at = composive.captionAt(cap, t);
+    c.classList.toggle("empty", !p.file);
+    s.textContent = !p.file ? "Captions: set file to a .captions.json" : at ? at.line.words.map((w) => w.w).join(" ") : "";
+    s.style.visibility = s.textContent ? "" : "hidden";
+    composive.place(c, p);
+    Object.assign(c.style, { maxWidth: p.width * 100 + "%", width: "max-content", fontSize: p.size + "px", fontWeight: p.weight, fontFamily: p.font, color: p.color });
+    s.style.background = hex(/^#[0-9a-f]{6}$/i.test(p.bg) ? p.bg : "#000000", p.bgOpacity);
+  };
+  seek(0);
+</script>
