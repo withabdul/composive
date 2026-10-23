@@ -9,6 +9,8 @@ bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chro
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
 bun bin/composive.ts export example --fast-perf   # 8 Chrome processes render at once (default 4, --low-perf = 1): faster, more CPU and RAM
 bun bin/composive.ts check example                # find what breaks the editor or the export (--json for tools)
+bun bin/composive.ts frame example --at 2         # one frame as PNG (in projects/example/preview/frames), as the export draws it
+bun bin/composive.ts frame example --sheet 12     # 12 frames in one image, with time labels
 ```
 
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).
@@ -36,6 +38,23 @@ when there is an error, so a script or an AI can run it after each edit. `--json
   with GSAP, files loaded from the internet.
 
 The HTML checks read the source text, so they can miss a problem or flag code that is fine.
+
+## Look at frames
+
+`composive frame <project>` draws frames with the export renderer (Chrome, no editor), so they are the frames
+the export writes. It takes a few seconds; no `dev` server is needed.
+
+- Files go to `<project>/preview/frames/` (not in git, not in Media, no live reload), named
+  `<scene or video>-<time>s.png`, e.g. `video-2.5s.png`, `001-hook-1s.png`. `-o f.png` writes there instead
+  (several times: `f-<time>s.png` next to it).
+- `--at 1,2.5,4`: those times (default 0).
+- `--sheet N` (1 to 48): N frames spread from the first to the last frame, in one image about 1600 px wide,
+  each labeled with its time (and its scene, for the whole video), named `<scene or video>-sheet.png`.
+- `--scene 001-hook`: that scene with the global tracks under it, times from the scene start (as in its
+  `timeline.json`). Without it, times are video time.
+- After the files it lists what went wrong in the page: a script error in a clip (with its file and line),
+  a `seek` that throws (with its time), a file that does not load (404). `--json` prints
+  `{ written, times, label, problems }`.
 
 ## Export from the editor
 

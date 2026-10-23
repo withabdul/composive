@@ -13,3 +13,5 @@ projects/*
 .trash/
 # exported videos (the editor Export button)
 exports/
+# composive frame output
+preview/

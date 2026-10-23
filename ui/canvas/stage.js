@@ -98,6 +98,15 @@ function place(el, p) {
   el.style.opacity = p.opacity;
 }
 
+// A scene whose seek throws draws on; the error is logged once per scene and message (composive frame lists it)
+const seekErrors = new Set();
+function seekError(src, t, e) {
+  const msg = String(e?.message ?? e), key = src + "\n" + msg;
+  if (seekErrors.has(key)) return;
+  seekErrors.add(key);
+  console.error(`${src}: seek(${+t.toFixed(3)}) threw: ${msg}`);
+}
+
 const withTimeout =(p, ms = 2000) => Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
 
 function syncVideo(v, target, playing) {
@@ -322,7 +331,8 @@ export function createStage(root, base = "/p/") {
         if (n.k === "scene") { // its defaults are known once loaded
           jobs.push(n.ready.then(() => {
             n.p = propsAt(c, n.defaults, local);
-            try { return n.el.contentWindow.seek?.(local, c.total ?? c.duration, n.p); } catch {}
+            try { return n.el.contentWindow.seek?.(local, c.total ?? c.duration, n.p); }
+            catch (e) { seekError(c.src, local, e); }
           }));
         } else {
           place(n.el, (n.p = propsAt(c, n.defaults, local)));

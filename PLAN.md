@@ -62,8 +62,8 @@ Decisions already made:
 ## AI loop (the AI edits files and must check its own work without a browser)
 
 - [x] Step A: `composive check <project> [--json]`: errors and warnings by file, exit code 1 on an error.
-- [ ] Step B: `composive frame <project> --at 3.5 [--scene 001-hook] -o f.png`, several times, `--sheet N`
-      (a contact sheet of N frames with time labels).
+- [x] Step B: `composive frame <project> --at 1,2.5 | --sheet N [--scene 001-hook] [-o f.png] [--json]`; lists
+      page errors (also a `seek` that throws: stage.js now logs it once per clip and message instead of hiding it).
 - [ ] Step C (later): a guide for the AI (AGENTS.md or a skill).
 
 ## Now
