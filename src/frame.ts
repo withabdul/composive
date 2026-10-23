@@ -9,7 +9,8 @@ import { compose, layout } from "../ui/core/project.js";
 
 // at: times in seconds (scene time with `scene`, else video time); sheet: N frames spread over the clip,
 // in one image with time labels. With `out`: one time writes `out`, more write <out>-<time>s.png next to it.
-// Without: <project>/preview/frames/<scene or "video">-<time>s.png, or -sheet.png.
+// Without: <project>/preview/frames/frame-00-at-5.15s.png (00 = place in `at`), scene-003-logo-at-0.5s.png,
+// frame-sheet.png, scene-003-logo-sheet.png.
 type Opts = { scene?: string; at?: number[]; sheet?: number };
 export async function frames(dir: string, out: string | undefined, { scene, at = [], sheet }: Opts) {
   const exe = chrome();
@@ -53,8 +54,10 @@ export async function frames(dir: string, out: string | undefined, { scene, at =
       shots.push(Buffer.from(await page.screenshot({ type: "png" })));
     }
 
-    const named = !!out;
-    out ??= join(resolve(dir), "preview", "frames", `${scene ?? "video"}${sheet ? "-sheet" : ""}.png`);
+    const named = !!out, folder = join(resolve(dir), "preview", "frames");
+    const pre = scene ? `scene-${scene}` : "frame", digits = Math.max(2, String(times.length - 1).length);
+    const nameOf = (i: number, t: number) => join(folder, `${pre}${scene ? "" : "-" + String(i).padStart(digits, "0")}-at-${+t.toFixed(3)}s.png`);
+    out ??= sheet ? join(folder, `${pre}-sheet.png`) : nameOf(0, times[0]);
     mkdirSync(dirname(out), { recursive: true });
     const written: string[] = [];
     if (sheet) {
@@ -74,7 +77,7 @@ export async function frames(dir: string, out: string | undefined, { scene, at =
     } else {
       const ext = extname(out) || ".png", stem = out.slice(0, out.length - extname(out).length);
       for (const [i, t] of times.entries()) {
-        const f = `${stem}-${+t.toFixed(3)}s${ext}`;
+        const f = named ? `${stem}-${+t.toFixed(3)}s${ext}` : nameOf(i, t);
         await Bun.write(f, shots[i]);
         written.push(f);
       }

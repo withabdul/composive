@@ -45,11 +45,13 @@ The HTML checks read the source text, so they can miss a problem or flag code th
 the export writes. It takes a few seconds; no `dev` server is needed.
 
 - Files go to `<project>/preview/frames/` (not in git, not in Media, no live reload), named
-  `<scene or video>-<time>s.png`, e.g. `video-2.5s.png`, `001-hook-1s.png`. `-o f.png` writes there instead
-  (several times: `f-<time>s.png` next to it).
+  `frame-<nn>-at-<time>s.png` (`nn` = the place in `--at`, from 00), e.g. `frame-01-at-5.15s.png`, or
+  `scene-<slug>-at-<time>s.png` with `--scene`, e.g. `scene-003-logo-at-0.5s.png`. `-o f.png` writes there
+  instead (several times: `f-<time>s.png` next to it).
 - `--at 1,2.5,4`: those times (default 0).
 - `--sheet N` (1 to 48): N frames spread from the first to the last frame, in one image about 1600 px wide,
-  each labeled with its time (and its scene, for the whole video), named `<scene or video>-sheet.png`.
+  each labeled with its time (and its scene, for the whole video), named `frame-sheet.png` or
+  `scene-<slug>-sheet.png`.
 - `--scene 001-hook`: that scene with the global tracks under it, times from the scene start (as in its
   `timeline.json`). Without it, times are video time.
 - After the files it lists what went wrong in the page: a script error in a clip (with its file and line),
