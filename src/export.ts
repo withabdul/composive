@@ -13,12 +13,16 @@ const CHROMES = [
   "/usr/bin/google-chrome",
   "/usr/bin/chromium",
 ];
+// Chrome processes that render frames at the same time: more = faster, but more CPU and RAM
+export const PERF = { low: 1, normal: 4, fast: 8 } as const;
+export type Perf = keyof typeof PERF;
 
 // scene: one scene folder (e.g. "001-hook") with the global tracks under it; else the whole video.
 // From the editor: port = its running server (no second one), onFrame = progress, signal = cancel
 // (the half-written file is then deleted).
-type Opts = { port?: number; onFrame?: (i: number, n: number) => void; signal?: AbortSignal };
-export async function exportVideo(dir: string, out: string, scene?: string, { port, onFrame, signal }: Opts = {}) {
+type Opts = { port?: number; onFrame?: (i: number, n: number) => void; signal?: AbortSignal; perf?: Perf };
+export async function exportVideo(dir: string, out: string, scene?: string, { port, onFrame, signal, perf = "normal" }: Opts = {}) {
+  const PAGES = PERF[perf];
   const exe = CHROMES.find((p) => p && existsSync(p));
   if (!exe) throw new Error("Chrome not found. Set CHROME_PATH.");
 
@@ -62,28 +66,40 @@ export async function exportVideo(dir: string, out: string, scene?: string, { po
 
   const ff = Bun.spawn(["ffmpeg", ...args], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
   const ffErr = new Response(ff.stderr).text();
-  let ok = false, browser;
+  let ok = false;
+  const browsers: Awaited<ReturnType<typeof puppeteer.launch>>[] = [];
   try {
-    browser = await puppeteer.launch({ executablePath: exe, headless: true });
-    const page = await browser.newPage();
-    await page.setViewport({ width: tl.width, height: tl.height });
-    await page.goto(`http://localhost:${server.port}/render`);
-    await page.evaluate((t) => (globalThis as any).__init(t), tl);
+    // one Chrome per worker: in one Chrome only the front tab runs requestAnimationFrame, so others hang
+    // each worker renders every PAGES-th frame; one round = PAGES frames, written in order
+    const pages = await Promise.all(Array.from({ length: PAGES }, async () => {
+      const b = await puppeteer.launch({ executablePath: exe, headless: true });
+      browsers.push(b);
+      const page = await b.newPage();
+      await page.setViewport({ width: tl.width, height: tl.height });
+      await page.goto(`http://localhost:${server.port}/render`);
+      await page.evaluate((t) => (globalThis as any).__init(t), tl);
+      return page;
+    }));
     const frames = Math.round(total * tl.fps);
-    for (let i = 0; i < frames; i++) {
+    for (let i = 0; i < frames; i += PAGES) {
       if (signal?.aborted) throw new Error("Export cancelled.");
-      await page.evaluate((t) => (globalThis as any).__frame(t), t0 + i / tl.fps);
-      ff.stdin.write(await page.screenshot({ type: "png" }));
+      const shots = await Promise.all(pages.slice(0, frames - i).map(async (page, k) => {
+        await page.evaluate((t) => (globalThis as any).__frame(t), t0 + (i + k) / tl.fps);
+        return page.screenshot({ type: "png", optimizeForSpeed: true });
+      }));
+      for (const s of shots) ff.stdin.write(s);
       await ff.stdin.flush();
-      if (onFrame) onFrame(i + 1, frames);
-      else process.stdout.write(`\rframe ${i + 1}/${frames}`);
+      const done = i + shots.length;
+      if (onFrame) onFrame(done, frames);
+      else process.stdout.write(`\rframe ${done}/${frames}`);
     }
     ff.stdin.end();
     if (await ff.exited) throw new Error("\n" + (await ffErr));
     ok = true;
     console.log(`\nwrote ${out}`);
   } finally {
-    await browser?.close();
+    // close() sometimes never returns on Windows: give it 3 s, then kill the process
+    await Promise.all(browsers.map((b) => Promise.race([b.close(), Bun.sleep(3000)]).then(() => b.process()?.kill())));
     server.stop(true);
     if (!ok) { ff.kill(); await ff.exited; rmSync(out, { force: true }); } // never leave a broken half file
   }

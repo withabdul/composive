@@ -7,6 +7,7 @@ bun install
 bun bin/composive.ts dev example            # editor at http://localhost:9999, live-reloads on file change
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
+bun bin/composive.ts export example --fast-perf   # 8 Chrome processes render at once (default 4, --low-perf = 1): faster, more CPU and RAM
 ```
 
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).

@@ -117,12 +117,14 @@ if (cmd === "dev") {
   console.log(`composive: http://localhost:${s.port}  (${dir})`);
 } else if (cmd === "export") {
   const { exportVideo } = await import("../src/export.ts");
-  await exportVideo(await project(dirArg), resolve(flag("-o", "out.mp4")!), flag("--scene"));
+  await exportVideo(await project(dirArg), resolve(flag("-o", "out.mp4")!), flag("--scene"),
+    { perf: rest.includes("--low-perf") ? "low" : rest.includes("--fast-perf") ? "fast" : "normal" });
+  process.exit(); // serve() keeps a ping timer and file watchers alive
 } else if (cmd === "import" && dirArg) {
   const { importFolder } = await import("../src/import.ts");
   await importFolder(await project(flag("-p")), resolve(dirArg));
 } else {
-  console.log("usage:\n  composive dev [project] [--port 9999]\n  composive export [project] [-o out.mp4] [--scene 001-hook]\n  composive import <folder> [-p project]\n" +
+  console.log("usage:\n  composive dev [project] [--port 9999]\n  composive export [project] [-o out.mp4] [--scene 001-hook] [--low-perf | --fast-perf]\n  composive import <folder> [-p project]\n" +
     "project = a name in projects/ (e.g. example) or a path; leave it out to pick from a menu");
   process.exit(1);
 }
