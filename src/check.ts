@@ -49,6 +49,7 @@ export async function check(dir: string) {
   if (!global) return { root, issues };
 
   for (const k of ["fps", "width", "height"]) if (global[k] !== undefined && !(num(global[k]) && global[k] > 0)) err("timeline.json", `${k} must be a number > 0`);
+  for (const k of ["width", "height"]) if (num(global[k]) && global[k] % 2) err("timeline.json", `${k} must be even: the H.264 export (yuv420p) fails on an odd size`);
 
   // HTML clips: each file once (defaults for the props check, plus the lint below)
   const pages = new Map<string, { file: string; defaults: any } | null>();

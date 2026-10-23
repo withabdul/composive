@@ -7,6 +7,17 @@
 import { normalize } from "../canvas/stage.js";
 
 export const SCENE = /^\d{3}-[a-z0-9][a-z0-9-]*$/; // folder name of a scene, e.g. 001-hook
+
+// Frame sizes for `composive new --preset` and the editor's size dialog.
+export const FORMATS = [
+  { id: "youtube", label: "YouTube, 16:9", width: 1920, height: 1080 },
+  { id: "reels", label: "Reels / TikTok / Shorts, 9:16", width: 1080, height: 1920 },
+  { id: "square", label: "Square, 1:1", width: 1080, height: 1080 },
+  { id: "portrait", label: "Instagram feed, 4:5", width: 1080, height: 1350 },
+  { id: "4k", label: "4K, 16:9", width: 3840, height: 2160 },
+];
+export const FPS = [24, 25, 30, 50, 60];
+export const formatOf = (tl) => FORMATS.find((f) => f.width === tl.width && f.height === tl.height);
 export const isGlobal = (tr) => tr.id.startsWith("G");
 export const end = (tl) => Math.max(0, ...(tl.tracks ?? []).flatMap((t) => (t.clips ?? []).map((c) => c.start + c.duration)));
 const round = (t) => Math.round(t * 1e6) / 1e6; // 0.1 + 0.2 must not be saved as 0.30000000000000004

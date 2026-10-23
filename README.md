@@ -4,6 +4,7 @@ Minimal video editor: HTML scenes + `timeline.json`. An AI edits the files, the 
 
 ```
 bun install
+bun bin/composive.ts new my-reel --preset reels  # an empty project in projects/my-reel, 1080x1920
 bun bin/composive.ts dev example            # editor at http://localhost:9999, live-reloads on file change
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
@@ -17,6 +18,24 @@ Projects live in `projects/`; a bare name like `example` means `projects/example
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
 `example` is a small demo.
+
+## Video size
+
+`composive new <name> [--preset <id>] [--fps 30]` makes `projects/<name>` (a path works too; the folder must
+be empty or new) with one scene `001-main` (track `V1`), a music track `GA1` and `media/`.
+
+| preset | size | for |
+|---|---|---|
+| `youtube` (default) | 1920x1080 | YouTube, 16:9 |
+| `reels` | 1080x1920 | Reels / TikTok / Shorts, 9:16 |
+| `square` | 1080x1080 | 1:1 |
+| `portrait` | 1080x1350 | Instagram feed, 4:5 |
+| `4k` | 3840x2160 | 4K, 16:9 |
+
+In the editor, the size button in the top bar (e.g. `1080×1920 · 30 fps`) opens a dialog: a preset or a
+custom width and height (rounded to even numbers: the H.264 export needs them), and the frame rate. It is one
+undo step. Clip `x` / `y` are fractions of the frame, so clips keep their place; HTML clips draw at the new
+size, so a clip made for 16:9 may need changes for 9:16 (check it with `composive frame`).
 
 ## Check a project
 
@@ -82,6 +101,7 @@ Supported: mp4, webm, mov, mp3, wav, m4a, ogg, png, jpg, webp. Name clashes beco
 ```
 app.js            startup, shortcuts, live reload
 export.js         Export button: dialog, progress, cancel (renders on the server into exports/)
+format.js         size button: frame size (presets in core/project.js) and fps
 core/             state.js shared state and helpers, history.js undo stacks (one for the project),
                   edit.js every timeline change plus undo/redo and save,
                   project.js scenes <-> one timeline (shared with export)

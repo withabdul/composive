@@ -66,6 +66,14 @@ Decisions already made:
       page errors (also a `seek` that throws: stage.js now logs it once per clip and message instead of hiding it).
 - [ ] Step C (later): a guide for the AI (AGENTS.md or a skill).
 
+## Content features
+
+- [x] Sizes: `composive new <name> --preset youtube|reels|square|portrait|4k [--fps]`; size button and dialog
+      in the editor (preset or custom, fps, one undo step); `check` flags an odd width or height.
+- [ ] Captions: `@captions` templates (more styles later, e.g. TikTok word highlight); words from SRT / VTT
+      (lines, words spread evenly) or ElevenLabs alignment JSON (word times).
+- [ ] Audio: volume keyframes, music ducking under the voice.
+
 ## Now
 
 - [ ] Scenes: test in the browser (switch, edit global from a scene, undo per scene, `+ Scene`, export both ways).

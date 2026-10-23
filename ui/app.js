@@ -9,6 +9,7 @@ import { zoomFit } from "./timeline/timeline.js"; // timeline, import and panel 
 import { forgetStrip } from "./timeline/filmstrip.js";
 import "./sidebar/import.js";
 import "./export.js";
+import "./format.js";
 import "./panel/panel.js";
 import { nudge } from "./canvas/gizmo.js";
 

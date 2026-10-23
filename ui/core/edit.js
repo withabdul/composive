@@ -420,6 +420,17 @@ export function clearRange() {
   commit();
 }
 
+/* ---------- frame size ---------- */
+
+// Frame size and fps of the whole video (the global timeline.json). Positions are fractions of the frame,
+// so clips keep their place; HTML clips draw at the new size.
+export function setFormat({ width, height, fps }) {
+  if (width === S.tl.width && height === S.tl.height && fps === S.tl.fps) return;
+  record();
+  Object.assign(S.tl, { width, height, fps });
+  commit();
+}
+
 /* ---------- add ---------- */
 
 // Dragging a clip vertically moves it to track `id` (the one under the pointer) if unlocked and of the same type.
