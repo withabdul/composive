@@ -14,6 +14,9 @@ bun bin/composive.ts frame example --at 2         # one frame as PNG (in project
 bun bin/composive.ts frame example --sheet 12     # 12 frames in one image, with time labels
 ```
 
+For an AI agent that edits the files: `AGENTS.md` (also read through `CLAUDE.md`) has the work loop
+(edit, `check`, `frame`, look), the file formats and the clip rules in short.
+
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.

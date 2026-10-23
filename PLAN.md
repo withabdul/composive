@@ -64,7 +64,8 @@ Decisions already made:
 - [x] Step A: `composive check <project> [--json]`: errors and warnings by file, exit code 1 on an error.
 - [x] Step B: `composive frame <project> --at 1,2.5 | --sheet N [--scene 001-hook] [-o f.png] [--json]`; lists
       page errors (also a `seek` that throws: stage.js now logs it once per clip and message instead of hiding it).
-- [ ] Step C (later): a guide for the AI (AGENTS.md or a skill).
+- [x] Step C: `AGENTS.md` (work loop, commands, file formats, templates, clip rules, transitions, sizes and
+      safe zones, captions, do-nots) and `CLAUDE.md` (`@AGENTS.md`). Keep it in step with README.
 
 ## Content features
 
