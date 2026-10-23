@@ -24,7 +24,11 @@
           "id": "cmvjzl9s7wkp",
           "src": "scenes/001-main/intro/index.html",
           "start": 0.033333,
-          "duration": 4
+          "duration": 4,
+          "props": {
+            "x": 0.5203,
+            "y": 0.4259
+          }
         }
       ]
     }

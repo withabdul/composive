@@ -1,7 +1,7 @@
 // All timeline mutations. Every change ends in commit(): re-sort, re-render, repaint, save.
-import { S, stage, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast } from "./state.js";
-import { H, record } from "./history.js";
-import { split, isGlobal } from "./project.js";
+import { S, stage, bus, MIN, EPS, clamp, uid, kind, clips, findClip, trackOf, locked, withLinked, isSel, selected, setSel, metaDur, el, redraw, snap, toast } from "./state.js";
+import { H, record, snapshot as projectSnapshot } from "./history.js";
+import { split, compose, isGlobal, withSceneFields } from "./project.js";
 import { loadAudio, startAudio } from "../timeline/audio.js";
 
 // The global part goes to timeline.json, the scene shown to scenes/<slug>/timeline.json. S.project
@@ -26,10 +26,51 @@ export function flushSave() {
   put("/api/timeline", global);
   const s = scene && S.project.scenes.find((x) => x.slug === S.scene);
   if (s) { // gone when its folder was deleted on disk
-    s.timeline = scene;
+    s.timeline = withSceneFields(scene, s.timeline);
     put("/api/timeline?scene=" + S.scene, scene);
   }
 }
+
+// A transition of scene `slug`: side "in" (`transition` in its timeline.json: from the scene before, or alone)
+// or "out" (`out`); null removes it. It can move scene starts, so app.js builds the view again ("scenetr" event).
+export function setTransition(slug, x, side = "in") {
+  flushSave();
+  const s = S.project.scenes.find((sc) => sc.slug === slug), key = side === "out" ? "out" : "transition";
+  if (!s) return;
+  if (x) s.timeline[key] = x; else delete s.timeline[key];
+  put("/api/timeline?scene=" + slug, s.timeline);
+}
+export const sceneTransition = (slug, x, side = "in") => bus.dispatchEvent(new CustomEvent("scenetr", { detail: { slug, x, side } }));
+
+// A clip transition: side "in" (at its start; at a cut, the transition between the two clips) or "out"
+// (at its end); null removes it. One undo step.
+export function setClipTransition(c, side, x) {
+  if (locked(c)) return;
+  record();
+  if (x) c[side] = x; else delete c[side];
+  commit();
+}
+
+// The selected transition (S.trSel), as { x, c, set } with set(next) storing it (null = delete), or null.
+export function selTransition() {
+  const t = S.trSel;
+  if (t?.kind === "scene") {
+    const x = S.project.scenes.find((s) => s.slug === t.slug)?.timeline[t.side === "out" ? "out" : "transition"];
+    return x && { x, set: (n) => sceneTransition(t.slug, n, t.side) };
+  }
+  const c = t && findClip(t.id);
+  return c?.[t.side] ? { x: c[t.side], c, set: (n) => setClipTransition(c, t.side, n) } : null;
+}
+// S.tl for the scene S.scene: its tracks in video time, the global tracks below. "" = all scenes:
+// every scene's tracks read-only (`ro`, locked, not saved), the global tracks editable.
+export function view() {
+  if (S.scene && !S.project.scenes.some((s) => s.slug === S.scene)) S.scene = ""; // its folder is gone
+  const { tl, a, b } = compose(S.project, S.scene || undefined);
+  if (!S.scene) for (const tr of tl.tracks) if (!isGlobal(tr)) tr.lock = tr.ro = true;
+  S.tl = tl;
+  S.win = { a, b };
+}
+
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, 200);
@@ -67,6 +108,7 @@ export function splitClip(c, ts, linked = true) {
     const b = { ...x, id: uid(), start: ts, duration: x.start + x.duration - ts, offset: (x.offset || 0) + ts - x.start, fadeIn: 0 };
     if (link) b.link = link; else delete b.link; // a half split alone is not linked to the other's sound
     if (x.keys) b.keys = structuredClone(x.keys); // each half gets its own keys (same times: they use content time)
+    delete b.in; delete x.out; // the transition in stays at the start, the transition out at the end
     b.total = x.total ?? x.duration; // scene keeps its original length so motion continues across the split
     x.total = b.total;
     x.duration = ts - x.start;
@@ -108,6 +150,7 @@ export function carve(top) {
       if (xs < s && xe > e) {
         const right = { ...structuredClone(x), id: uid(), start: e, duration: xe - e, offset: (x.offset || 0) + e - xs, fadeIn: 0 };
         delete right.link; // its linked sound was not cut
+        delete right.in; delete x.out; // as with split
         x.duration = s - xs;
         x.fadeOut = 0;
         clampFades(right);
@@ -491,14 +534,32 @@ export function removeEmptyTracks() {
   commit();
 }
 
+// Undo/redo: put a project snapshot back. Only the timeline files that differ are written; the view stays
+// on the scene shown, and the toast names the other scenes that changed.
 function step(from, to, name) {
   if (S.drag) return;
   if (!from.length) return toast(`Nothing to ${name.toLowerCase()}`);
-  to.push(JSON.stringify(S.tl));
-  S.tl = JSON.parse(from.pop());
+  to.push(projectSnapshot());
+  const p = JSON.parse(from.pop()), changed = [];
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (JSON.stringify(p.timeline) !== JSON.stringify(S.project.timeline)) {
+    S.project.timeline = p.timeline;
+    put("/api/timeline", p.timeline);
+  }
+  for (const s of S.project.scenes) { // a scene made or deleted since the snapshot is left as it is
+    const t = p.scenes[s.slug];
+    if (!t || JSON.stringify(t) === JSON.stringify(s.timeline)) continue;
+    s.timeline = t;
+    put("/api/timeline?scene=" + s.slug, t);
+    changed.push(s.slug);
+  }
+  view();
   if (!findClip(S.sel)) S.sel = null;
+  if (S.trSel && !selTransition()) S.trSel = null;
   commit();
-  toast(name);
+  const other = changed.filter((s) => s !== S.scene);
+  toast(other.length ? `${name} (${other.join(", ")})` : name);
 }
 export const undo = () => step(H.undo, H.redo, "Undo");
 export const redo = () => step(H.redo, H.undo, "Redo");

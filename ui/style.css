@@ -18,8 +18,7 @@ kbd { opacity: .55; font-size: 11px; margin-left: 3px; }
 
 #top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
 #top input, #top select { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; }
-#top input:disabled { color: var(--dim); }
-#exportInfo { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#top input:disabled { color: var(--dim); }#exportInfo { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #exportInfo.err { color: #ff6b6b; }
 .modal label { display: block; margin-bottom: 10px; font-size: 12px; color: var(--dim); }
 .modal label select, .modal label input { display: block; width: 100%; margin-top: 4px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; }
@@ -146,6 +145,24 @@ body.drop::after { content: "Drop files or a folder to import"; position: fixed;
 /* header column cells over the ruler and below the last track: the playhead goes under them, as under track headers */
 #ruler .corner { position: sticky; left: 0; z-index: 15; display: flex; gap: 3px; align-items: center; padding: 0 4px; width: var(--label); height: 100%; background: var(--panel); border-right: 1px solid var(--line); }
 #ruler .corner button { flex: 1; padding: 0; font-size: 10px; line-height: 16px; color: var(--dim); }
+/* scene bar: a block per scene, the scene transitions on the seams */
+#scenebar { position: relative; flex: none; height: 22px; border-bottom: 1px solid var(--line); }
+#scenebar .corner { position: sticky; left: 0; z-index: 15; display: flex; align-items: center; padding: 0 6px; width: var(--label); height: 100%; box-sizing: border-box; background: var(--panel); border-right: 1px solid var(--line); font-size: 10px; color: var(--dim); }
+.sblk { position: absolute; top: 3px; bottom: 3px; box-sizing: border-box; padding: 0 6px; overflow: hidden; white-space: nowrap; font-size: 10px; line-height: 14px; color: var(--dim); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+.sblk.on { color: var(--text); border-color: var(--accent); }
+/* a transition: on a seam of the scene bar, or over the clips of a track */
+.trb { position: absolute; z-index: 6; box-sizing: border-box; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap;
+       font-size: 9px; font-weight: 600; color: #1a1300; background: repeating-linear-gradient(135deg, #f2c14e 0 5px, #e3ab2c 5px 10px); border: 1px solid #ffe08a; border-radius: 3px; cursor: ew-resize; }
+#scenebar .trb { top: 2px; bottom: 2px; }
+.row .trb { top: 10px; bottom: 10px; }
+.trb.sel { outline: 2px solid #fff; }
+.trb.ro { cursor: default; opacity: .55; }
+.pnote { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--dim); }
+#transitions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.trtile { cursor: grab; }
+.trprev { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 4px; background: #000; }
+.trprev div { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; color: #fff; }
+.trprev .a { background: #3b6fd6; } .trprev .b { background: #d6743b; }
 #rows { flex: 1; display: flex; flex-direction: column; }
 #rows .row { flex: none; }
 #rows .row.filler { flex: 1; display: flex; border-bottom: 0; } /* flex: its header cell stretches to full height */

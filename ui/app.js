@@ -1,10 +1,9 @@
 // Entry point: load the project, wire controls and shortcuts, live-reload on disk changes.
-import { $, S, stage, audioClips, clips, locked, selected, setSel, totalDur, redraw, toast, EPS } from "./core/state.js";
-import { H, pushUndo, useHistory, dropHistory } from "./core/history.js";
-import { compose, isGlobal } from "./core/project.js";
+import { $, S, stage, bus, audioClips, clips, locked, selected, setSel, totalDur, redraw, toast, EPS } from "./core/state.js";
+import { pushSnapshot, snapshot, record } from "./core/history.js";
 import { loadAudio } from "./timeline/audio.js";
 import { fit, ui, play, pause, seek, playReverse } from "./canvas/viewer.js";
-import { removeClips, undo, redo, copySel, paste, duplicate, setRange, clearRange, toggleLink, removeEmptyTracks, addMarker, flushSave } from "./core/edit.js";
+import { removeClips, undo, redo, copySel, paste, duplicate, setRange, clearRange, toggleLink, removeEmptyTracks, addMarker, flushSave, setTransition, selTransition, view } from "./core/edit.js";
 import { drawSide, forgetSide } from "./sidebar/sidebar.js";
 import { zoomFit } from "./timeline/timeline.js"; // timeline, import and panel also register their own listeners
 import { forgetStrip } from "./timeline/filmstrip.js";
@@ -12,20 +11,6 @@ import "./sidebar/import.js";
 import "./export.js";
 import "./panel/panel.js";
 import { nudge } from "./canvas/gizmo.js";
-
-// S.tl for the scene S.scene: its tracks in video time, the global tracks below. "" = all scenes:
-// every scene's tracks read-only (`ro`, locked, not saved), the global tracks editable.
-function view() {
-  if (S.scene && !S.project.scenes.some((s) => s.slug === S.scene)) S.scene = ""; // its folder is gone
-  const { tl, a, b } = compose(S.project, S.scene || undefined);
-  if (!S.scene) for (const tr of tl.tracks) if (!isGlobal(tr)) tr.lock = tr.ro = true;
-  S.tl = tl;
-  S.win = { a, b };
-}
-
-// What this view shares with the other views (see useHistory): the scene start, and the global
-// tracks (scene view) or the scene tracks (all scenes).
-const sig = () => JSON.stringify([S.win.a, S.tl.tracks.filter((t) => (S.scene ? isGlobal(t) : t.ro))]);
 
 // takeTimeline=false keeps the in-memory timeline: it may hold edits not yet saved to disk.
 async function fetchProject(takeTimeline = true) {
@@ -39,11 +24,9 @@ async function fetchProject(takeTimeline = true) {
 const sceneKey = () => "composive.scene." + S.project.name;
 async function openScene(slug) {
   flushSave(); // the pending save belongs to the scene shown now
-  if (S.tl) H.sig = sig(); // not on the first open
   S.scene = slug;
   S.sel = null;
   view();
-  useHistory(S.scene, sig());
   try { localStorage.setItem(sceneKey(), S.scene); } catch {}
   drawSide();
   await refresh();
@@ -60,6 +43,14 @@ $("#addScene").onclick = async () => {
   const { slug } = await res.json();
   if (await fetchProject(false)) await openScene(slug);
 };
+
+// A scene transition was set (timeline bar, panel, drop): it moves scene starts, so the view is built again.
+bus.addEventListener("scenetr", async (e) => {
+  record();
+  setTransition(e.detail.slug, e.detail.x, e.detail.side);
+  view();
+  await refresh();
+});
 
 async function refresh() {
   stage.setTimeline(S.tl); // first: a seek while the audio still decodes needs the stage ready
@@ -131,6 +122,7 @@ addEventListener("keydown", (e) => {
   else if (k === "n") toggleMagnet();
   else if (k === "w") toggleOverwrite();
   else if (tools[k]) { S.tool = tools[k]; ui(); }
+  else if ((k === "delete" || k === "backspace") && S.trSel) { selTransition()?.set(null); S.trSel = null; redraw(); }
   else if (k === "delete" || k === "backspace") removeClips(selected(), S.magnet !== e.shiftKey); // ripple when magnet is on; Shift = the other way
   else if (k === "home") seek(S.win.a);
   else if (k === "end") seek(S.scene ? S.win.b : totalDur());
@@ -153,14 +145,12 @@ new EventSource("/api/events").onmessage = (e) => {
     forgetStrip(name);
     forgetSide(name);
     const isTimeline = name === "timeline.json" || /^scenes\/[^/]+\/timeline\.json$/.test(name);
-    const before = JSON.stringify(S.tl), a0 = S.win.a;
+    const before = isTimeline && snapshot();
     if (!(await fetchProject(isTimeline))) return;
-    // an outside edit (the AI) to the timeline can be undone too; when it moved this scene's start
-    // (a scene before it changed length) the old snapshots have the wrong times, so they go
-    if (isTimeline && S.win.a !== a0) { dropHistory(S.scene); useHistory(S.scene, sig()); }
-    else if (isTimeline && JSON.stringify(S.tl) !== before) pushUndo(before);
+    if (isTimeline && snapshot() !== before) pushSnapshot(before); // an outside edit (the AI) can be undone too
     drawSide();
-    if (/\.(html|css|js)$/.test(name)) stage.reloadScenes();
+    if (name.startsWith("transitions/")) stage.reloadTransitions();
+    else if (/\.(html|css|js)$/.test(name)) stage.reloadScenes();
     await refresh();
   }, 150);
 };

@@ -2,7 +2,14 @@
   "name": "composive",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "composive": "bin/composive.ts" },
-  "scripts": { "dev": "bun bin/composive.ts dev example" },
-  "dependencies": { "puppeteer-core": "^24.15.0" }
+  "bin": {
+    "composive": "bin/composive.ts"
+  },
+  "scripts": {
+    "dev": "bun bin/composive.ts dev example"
+  },
+  "dependencies": {
+    "gsap": "^3.15.0",
+    "puppeteer-core": "^24.15.0"
+  }
 }
