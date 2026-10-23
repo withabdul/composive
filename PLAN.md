@@ -74,7 +74,10 @@ Decisions already made:
       `@captions` (classic) and `@captions-tiktok` (word highlight, pop); runtime `composive.captions` /
       `captionAt`; `check` reads the file; the editor reloads scenes when a .json changes.
 - [ ] Captions later: more styles; drop an .srt / alignment JSON in the editor; a word editor in the panel.
-- [ ] Audio: volume keyframes, music ducking under the voice.
+- [x] Audio: `keys.volume` (panel ◆), ducking (`track.duck` gain under `track.voice` tracks); one gain
+      envelope (`stage.js envelope()`) for preview (WebAudio ramps) and export (chained ffmpeg volume
+      expressions, at most 16 lines each: a long expression fails to parse); gain line on audio clips.
+- [ ] Audio later: ducking by the voice's sound (sidechain), duck fade and hold as settings.
 
 ## Now
 

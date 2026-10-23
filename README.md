@@ -355,6 +355,19 @@ track and clip format:
   `sx`, `sy` (stretch width / height on top of scale, 1), `rotation` (degrees, 0), `opacity` (0..1, 1).
   Preview and export both apply them.
 
+## Audio volume and ducking
+
+- `volume` can have keyframes like a prop: `"keys": { "volume": [{ "t": 0, "v": 0 }, { "t": 2, "v": 1, "ease": "inout" }] }`
+  (`t` = clip-local time, offset included). In the panel, `◆` next to volume adds a key at the playhead.
+- Ducking: an audio track with `"duck": 0.25` goes down to that gain (0.25 = about -12 dB) while a clip of an
+  audio track with `"voice": true` plays (mute and solo apply), 0.3 s down before the voice and 0.3 s up after.
+  Voice clips less than 1.2 s apart count as one stretch, so the music does not go up between two sentences.
+  In the panel's Track section: the `voice` box and the `duck` field (empty = off). It goes by the voice clips
+  on the timeline, not by the sound in them (a pause inside one voice clip keeps the music down).
+- The clip gain is volume (or its keys) x fadeIn / fadeOut x ducking, computed once (`envelope()` in
+  `ui/canvas/stage.js`) for the preview and the export. On an audio clip, a yellow line shows it when it is
+  not a plain 1.
+
 ## Editor
 
 Tools: View `V` (select, move, trim edges, drag fade handles), Pan `H`, Cut `X` (click a clip to delete it),

@@ -108,6 +108,8 @@ export async function check(dir: string) {
   };
 
   const links = new Map<string, string[]>();
+  const ducks: string[] = [];
+  let voices = 0;
   const tracks = async (file: string, tl: any, scene: boolean) => {
     if (!Array.isArray(tl.tracks)) return tl.tracks === undefined ? undefined : err(file, "tracks must be a list");
     const ids = new Set<string>();
@@ -120,6 +122,11 @@ export async function check(dir: string) {
       const type = tr.type ?? "video";
       if (type !== "video" && type !== "audio") { err(file, `type must be "video" or "audio"`, tat); continue; }
       if (tr.clips !== undefined && !Array.isArray(tr.clips)) { err(file, "clips must be a list", tat); continue; }
+      if (tr.duck !== undefined && !(num(tr.duck) && tr.duck >= 0 && tr.duck < 1)) err(file, "duck must be a gain from 0 to below 1 (e.g. 0.25)", tat);
+      if ((tr.duck !== undefined || tr.voice) && type !== "audio") warn(file, "duck / voice do nothing on a video track", tat);
+      if (tr.voice !== undefined && typeof tr.voice !== "boolean") err(file, "voice must be true or false", tat);
+      if (type === "audio" && tr.duck !== undefined) ducks.push(`${file} ${tat}`);
+      if (type === "audio" && tr.voice) voices++;
       const clips = tr.clips ?? [];
       for (const [ci, c] of clips.entries()) await clip(file, `${tat} clip ${ci + 1}${c?.id ? ` (${c.id})` : ""}`, c, type, scene);
       const ok = clips.filter((c: any) => num(c?.start) && num(c?.duration));
@@ -181,6 +188,7 @@ export async function check(dir: string) {
           if (key?.ease !== undefined && !EASES.includes(key.ease)) err(file, `keys.${p}[${i}].ease must be one of ${EASES.join(", ")}`, at);
           if (i && num(key?.t) && num(ks[i - 1]?.t) && key.t < ks[i - 1].t) err(file, `keys.${p} must be sorted by t`, at);
         });
+        if (p === "volume" && type === "audio" && ks.some((key: any) => !(num(key?.v) && key.v >= 0))) err(file, "keys.volume values must be numbers >= 0", at);
         const types = new Set(ks.map((key: any) => (HEX.test(key?.v) ? "color" : typeof key?.v)));
         if (types.size > 1) warn(file, `keys.${p} mixes value types (${[...types].join(", ")}): they do not blend`, at);
       }
@@ -194,6 +202,7 @@ export async function check(dir: string) {
     transition(file, "scene", "transition", s.timeline.transition);
     transition(file, "scene", "out", s.timeline.out);
   }
+  if (ducks.length && !voices) for (const d of ducks) warn(d.split(" ")[0], 'duck is set but no audio track has "voice": true, so nothing ducks it', d.split(" ").slice(1).join(" "));
   for (const [id, at] of links) if (at.length < 2) warn(at[0].split(" ")[0], `link "${id}" has only this clip`, at[0].split(" ").slice(1).join(" "));
 
   // scene transitions longer than layout() lets them be

@@ -1,8 +1,35 @@
 import puppeteer from "puppeteer-core";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "./server.ts";
-import { audible } from "../ui/canvas/stage.js";
+import { audible, envelope, gainAt } from "../ui/canvas/stage.js";
+
+// ffmpeg volume filters for gain points P (video time) over a..b of a clip; t = 0 at a after atrim.
+// A fixed gain is one number; else straight lines between the points, evaluated per 256 samples (~5 ms).
+// ffmpeg cannot parse a long expression, so each volume filter holds at most 16 lines and is 1 outside
+// them: the chain multiplies to the whole curve.
+export function gainFilter(P: { t: number; v: number }[], a: number, b: number) {
+  const r = (x: number) => +x.toFixed(6);
+  const Q = [{ t: a, v: gainAt(P, a) }, ...P.filter((p) => p.t > a && p.t < b), { t: b, v: gainAt(P, b) }];
+  if (Q.every((p) => Math.abs(p.v - Q[0].v) < 1e-6)) return `volume=${r(Q[0].v)}`;
+  const segs: { from: number; to: number; term: string }[] = [];
+  for (let i = 1; i < Q.length; i++) {
+    const p = Q[i - 1], q = Q[i], x = r(p.t - a), y = r(q.t - a);
+    if (y - x < 1e-6) continue;
+    const k = r((q.v - p.v) / (q.t - p.t));
+    segs.push({ from: x, to: y, term: `gte(t,${x})*lt(t,${y})*(${r(p.v)}${k ? `+${k}*(t-${x})` : ""})` });
+  }
+  const end = r(b - a), filters = [];
+  for (let i = 0; i < segs.length; i += 16) {
+    const part = segs.slice(i, i + 16), last = i + 16 >= segs.length;
+    const from = part[0].from, to = part.at(-1)!.to;
+    const terms = [...part.map((s) => s.term), last ? `gte(t,${end})*${r(Q.at(-1)!.v)}` : `gte(t,${to})`];
+    if (from > 0) terms.push(`lt(t,${from})`); // 1 before this part
+    filters.push(`volume='${terms.join("+").replaceAll("+-", "-")}':eval=frame`);
+  }
+  return ["asetnsamples=n=256:p=0", ...filters].join(",");
+}
 import { compose } from "../ui/core/project.js";
 
 const CHROMES = [
@@ -49,22 +76,25 @@ export async function exportVideo(dir: string, out: string, scene?: string, { po
     .map((c: any) => ({ c, a: Math.max(c.start, t0), b: Math.min(c.start + c.duration, t1) }))
     .filter((x: any) => x.b > x.a);
 
+  let graphFile = "";
   const args = ["-y", "-f", "image2pipe", "-framerate", String(tl.fps), "-i", "-"];
   for (const { c } of audio) args.push("-i", join(dir, c.src));
   if (audio.length) {
     const chains = audio.map(({ c, a, b }: any, i: number) => {
       const cut = a - c.start, len = b - a, ms = Math.round((a - t0) * 1000);
-      // fades keep their place on the clip; the part cut away by the range is dropped
-      // shortcut: a fade-in cut in the middle restarts from silence instead of from its mid level
-      const fi = Math.max(0, (c.fadeIn ?? 0) - cut);
-      const foStart = c.duration - (c.fadeOut ?? 0) - cut, foSt = Math.max(0, foStart), fo = (c.fadeOut ?? 0) - (foSt - foStart);
-      return `[${i + 1}:a]atrim=start=${(c.offset ?? 0) + cut}:duration=${len},asetpts=PTS-STARTPTS,volume=${c.volume ?? 1}` +
-        (fi ? `,afade=t=in:st=0:d=${fi}` : "") +
-        (c.fadeOut && fo > 0 && foSt < len ? `,afade=t=out:st=${foSt}:d=${fo}` : "") +
+      // volume, keyframes, fades and ducking: the points the preview uses too (stage.js envelope)
+      return `[${i + 1}:a]atrim=start=${(c.offset ?? 0) + cut}:duration=${len},asetpts=PTS-STARTPTS,${gainFilter(envelope(tl, c), a, b)}` +
         `,adelay=${ms}:all=1[a${i}]`;
     });
     const mix = audio.map((_: any, i: number) => `[a${i}]`).join("") + `amix=inputs=${audio.length}:normalize=0:duration=longest[aout]`;
-    args.push("-filter_complex", [...chains, mix].join(";"), "-map", "0:v", "-map", "[aout]", "-c:a", "aac");
+    const graph = [...chains, mix].join(";");
+    // a long graph (many gain points) goes in a file: a Windows command line holds about 32 000 characters
+    if (graph.length > 8000) {
+      graphFile = join(tmpdir(), `composive-graph-${process.pid}-${Date.now()}.txt`);
+      writeFileSync(graphFile, graph);
+      args.push("-/filter_complex", graphFile); // ffmpeg 7+
+    } else args.push("-filter_complex", graph);
+    args.push("-map", "0:v", "-map", "[aout]", "-c:a", "aac");
   } else args.push("-an");
   args.push("-t", String(total), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", String(tl.fps), out);
 
@@ -105,6 +135,7 @@ export async function exportVideo(dir: string, out: string, scene?: string, { po
     // close() sometimes never returns on Windows: give it 3 s, then kill the process
     await Promise.all(browsers.map((b) => Promise.race([b.close(), Bun.sleep(3000)]).then(() => b.process()?.kill())));
     server.stop(true);
+    if (graphFile) rmSync(graphFile, { force: true });
     if (!ok) { ff.kill(); await ff.exited; rmSync(out, { force: true }); } // never leave a broken half file
   }
 }

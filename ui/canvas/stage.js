@@ -24,6 +24,58 @@ export function audible(tl) {
   return aud.filter((t) => (solo ? t.solo : !t.mute)).flatMap((t) => t.clips);
 }
 
+/* ---------- audio gain (shared by preview and export) ---------- */
+// A track with `duck` (a gain, e.g. 0.25) goes down to it while a clip of a track with `voice: true` plays
+// (mute and solo apply), with DUCK_FADE seconds to go down before and up after. Voice clips closer than
+// DUCK_HOLD stay one stretch, so the music does not pump between two sentences.
+export const DUCK_FADE = 0.3, DUCK_HOLD = 0.6;
+const lin = (P, t) => { // a value of points [{ t, v }] (straight lines between them, the end values outside)
+  if (t <= P[0].t) return P[0].v;
+  const i = P.findIndex((p) => p.t > t);
+  if (i < 0) return P.at(-1).v;
+  const a = P[i - 1], b = P[i];
+  return a.v + ((b.v - a.v) * (t - a.t)) / (b.t - a.t || 1);
+};
+function duckPoints(tl, tr) {
+  if (!(tr.duck >= 0 && tr.duck < 1)) return null;
+  const on = new Set(audible(tl));
+  const spans = tl.tracks.filter((t) => t.type === "audio" && t.voice && t !== tr).flatMap((t) => t.clips.filter((c) => on.has(c)))
+    .map((c) => [c.start, c.start + c.duration]).sort((p, q) => p[0] - q[0]);
+  const merged = [];
+  for (const s of spans) {
+    const last = merged.at(-1);
+    if (last && s[0] - last[1] < DUCK_HOLD + 2 * DUCK_FADE) last[1] = Math.max(last[1], s[1]);
+    else merged.push([...s]);
+  }
+  if (!merged.length) return null;
+  return [{ t: -1e9, v: 1 }, ...merged.flatMap(([a, b]) => [
+    { t: a - DUCK_FADE, v: 1 }, { t: a, v: tr.duck }, { t: b, v: tr.duck }, { t: b + DUCK_FADE, v: 1 },
+  ])];
+}
+// The gain of audio clip c over its time, as points [{ t, v }] in video time with straight lines between
+// them: volume (or its keyframes `keys.volume`) x fadeIn / fadeOut x ducking. An eased key is cut in steps.
+export function envelope(tl, c) {
+  const a = c.start, b = c.start + c.duration, off = c.offset ?? 0, fi = c.fadeIn || 0, fo = c.fadeOut || 0;
+  const ks = c.keys?.volume?.length ? c.keys.volume : null;
+  const vol = (t) => (ks ? keyValue(ks, t - a + off) : c.volume ?? 1);
+  const fade = (t) => Math.max(0, Math.min(1, fi ? (t - a) / fi : 1, fo ? (b - t) / fo : 1));
+  const duck = duckPoints(tl, tl.tracks.find((t) => t.clips.includes(c)) ?? {});
+  const ts = new Set([a, b, a + fi, b - fo]);
+  if (ks) ks.forEach((k, i) => {
+    const t = a + k.t - off, next = ks[i + 1];
+    ts.add(t);
+    if (next && k.ease && k.ease !== "linear") { // a curve: 20 steps per second
+      const t2 = a + next.t - off;
+      if (k.ease === "hold") ts.add(t2 - 1e-3);
+      else for (let x = t; x < t2; x += 0.05) ts.add(x);
+    }
+  });
+  if (duck) for (const p of duck) ts.add(p.t);
+  return [...ts].filter((t) => t >= a && t <= b).sort((p, q) => p - q)
+    .map((t) => ({ t, v: vol(t) * fade(t) * (duck ? lin(duck, t) : 1) }));
+}
+export const gainAt = (P, t) => lin(P, t);
+
 // Transitions of the clips on one video track: [{ x, a, b, from, to }], a..b in video time.
 // c.in at a cut (the clip before ends where c starts) is centered on the cut and shows both clips
 // (from = the clip before, to = c); c.in with no clip before, or with `only: true`, plays over the start

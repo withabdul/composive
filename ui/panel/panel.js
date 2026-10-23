@@ -4,8 +4,8 @@
 // clip and an edit applies to all of them (start moves them all by the same amount).
 import { $, S, el, MIN, EPS, bus, redraw, findClip, clipKind, trackOf, selected, selIds, snap, stage } from "../core/state.js";
 import { pushUndo } from "../core/history.js";
-import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, place, setProp, toggleKey, setEase, localAt, selTransition } from "../core/edit.js";
-import { propsAt, EASES } from "../canvas/stage.js";
+import { commit, clampFades, splitClip, removeClips, duplicate, toggleLink, renameTrack, toggleTrack, setDuck, place, setProp, toggleKey, setEase, localAt, selTransition } from "../core/edit.js";
+import { propsAt, keyValue, EASES } from "../canvas/stage.js";
 import { ui } from "../canvas/viewer.js";
 
 const FALLBACK = { offset: 0, fadeIn: 0, fadeOut: 0, volume: 1 };
@@ -21,13 +21,14 @@ function commonProps(cs, c) {
 // what the form is built from: rebuild when any of it changes
 const keyOf = (c) => {
   const tr = trackOf(c), cs = selected();
-  return [selIds().join(), c.src, clipKind(c), !!c.link, tr.id, tr.name, tr.mute, tr.solo, tr.hide, tr.lock,
+  return [selIds().join(), c.src, clipKind(c), !!c.link, tr.id, tr.name, tr.mute, tr.solo, tr.hide, tr.lock, tr.voice, tr.duck,
     cs.map(clipKind).join(), commonProps(cs, c).join()].join("|");
 };
 
 // a field's value at the playhead (keyframes applied)
 function read(c, path) {
   if (path.startsWith("props.")) return propsAt(c, stage.defaults(c.id), localAt(c))[path.slice(6)];
+  if (c.keys?.[path]?.length) return keyValue(c.keys[path], localAt(c)); // an animated volume
   return c[path] ?? FALLBACK[path];
 }
 
@@ -74,7 +75,7 @@ function field(g, label, path, type, attrs = {}, keyable = false) {
     row.append(sl);
   }
   row.append(input);
-  if (keyable) row.append(...keyButtons(path.slice(6), input));
+  if (keyable) row.append(...keyButtons(path.replace(/^props\./, ""), input));
   g.append(row);
 }
 
@@ -164,7 +165,7 @@ function build(c) {
 
   if (cs.every((x) => clipKind(x) === "audio")) {
     const a = group("Audio");
-    field(a, "volume", "volume", "number", { step: "0.05" });
+    field(a, "volume", "volume", "number", { step: "0.05" }, !many);
     field(a, "fadeIn", "fadeIn", "number", { step: "0.1" });
     field(a, "fadeOut", "fadeOut", "number", { step: "0.1" });
   }
@@ -223,17 +224,31 @@ function trackGroup(tr) {
   name.onchange = (e) => { e.stopPropagation(); renameTrack(tr.id, name.value); focusSnap = JSON.stringify(S.tl); };
   row.append(el("span", "", "name"), name);
   g.append(row);
-  const flags = tr.type === "audio" ? ["mute", "solo", "lock"] : ["hide", "lock"];
+  const flags = tr.type === "audio" ? ["mute", "solo", "lock", "voice"] : ["hide", "lock"];
   const box = el("div", "pflags");
   for (const key of flags) {
     const l = el("label"), cb = el("input");
     cb.type = "checkbox";
     cb.checked = !!tr[key];
     cb.onchange = (e) => { e.stopPropagation(); toggleTrack(tr.id, key); focusSnap = JSON.stringify(S.tl); };
+    if (key === "voice") l.title = "Voice: tracks with duck go down while this track plays";
     l.append(cb, key);
     box.append(l);
   }
   g.append(box);
+  if (tr.type !== "audio") return;
+  // duck: the gain this track goes down to while a voice track plays; empty = off
+  const drow = el("label", "pf"), duck = el("input");
+  Object.assign(duck, { type: "number", min: 0, max: 0.95, step: 0.05, placeholder: "off", value: tr.duck ?? "" });
+  duck.title = "Gain while a voice track plays (0.25 = about -12 dB). Empty = no ducking.";
+  duck.onchange = (e) => {
+    e.stopPropagation();
+    setDuck(tr.id, duck.value === "" ? null : duck.valueAsNumber);
+    focusSnap = JSON.stringify(S.tl);
+    duck.blur();
+  };
+  drow.append(el("span", "", "duck"), duck);
+  g.append(drow);
 }
 
 function sync(c) {
@@ -359,8 +374,10 @@ function apply(input) {
   } else if (path === "start") {
     const d = Math.max(0, v) - main.start;
     for (const c of cs) c.start = Math.max(0, c.start + d);
+  } else if (path === "volume") {
+    for (const c of cs) setProp(c, "volume", Math.max(0, v)); // auto-key when animated
   } else {
-    if (path === "offset" || path === "fadeIn" || path === "fadeOut" || path === "volume") v = Math.max(0, v);
+    if (path === "offset" || path === "fadeIn" || path === "fadeOut") v = Math.max(0, v);
     if (path === "duration") v = Math.max(MIN, v);
     for (const c of cs) { c[path] = v; clampFades(c); }
   }

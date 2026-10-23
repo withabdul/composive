@@ -3,7 +3,7 @@ import { $, S, bus, redraw, el, toast, clamp, kind, clipKind, DRAG_SRC, DRAG_TR,
 import { pushUndo } from "../core/history.js";
 import { commit, splitClip, removeClips, moveTrack, clampFades, carve, bump, addClip, reorderTrack, addTrack, deleteTrack, toggleTrack, toggleGlobal, renameTrack, setMarker, removeMarker, MARKER_COLOR, removeKeysAt, sceneTransition, setClipTransition, selTransition } from "../core/edit.js";
 import { isGlobal, layout, end } from "../core/project.js";
-import { clipTransitions } from "../canvas/stage.js";
+import { clipTransitions, envelope } from "../canvas/stage.js";
 import { seek, ui } from "../canvas/viewer.js";
 import { strip, FRAME_H } from "./filmstrip.js";
 
@@ -192,7 +192,10 @@ function clipEl(c, view, tr) {
   if (to > from) {
     const key = `|${S.pps}|${from}|${to}|${c.offset || 0}|${c.duration}`;
     if (k === "audio") {
-      d.append(cached(c, `${key}|${c.fadeIn}|${c.fadeOut}|${!!S.peaks.get(c.src)}`, () => waveCanvas(c, from, to)));
+      // its gain line (keys, volume, ducking by the voice tracks); a plain clip has none, and costs nothing
+      const plain = !c.keys?.volume?.length && (c.volume ?? 1) === 1 && !(tr.duck >= 0);
+      const P = plain ? [] : envelope(S.tl, c);
+      d.append(cached(c, `${key}|${c.fadeIn}|${c.fadeOut}|${!!S.peaks.get(c.src)}|${JSON.stringify(P)}`, () => waveCanvas(c, from, to, P)));
     }
     if (k === "video") d.append(cached(c, `${key}|${!!strip(c.src)}`, () => filmCanvas(c, from, to)));
   }
@@ -232,7 +235,7 @@ function clipCanvas(c, h, from, to) {
   return { cv, g, x0: dx, x1: dx + w, cw: Math.round(c.duration * S.pps) };
 }
 
-function waveCanvas(c, from, to) {
+function waveCanvas(c, from, to, P) {
   const h = ROW.audio - 8, { cv, g, x0, x1, cw } = clipCanvas(c, h, from, to);
   const p = S.peaks.get(c.src), off = c.offset || 0;
   g.fillStyle = "rgba(255,255,255,.7)";
@@ -244,6 +247,14 @@ function waveCanvas(c, from, to) {
   const fi = (c.fadeIn || 0) * S.pps, fo = (c.fadeOut || 0) * S.pps;
   if (fi > 0) { g.beginPath(); g.moveTo(0, 0); g.lineTo(fi, 0); g.lineTo(0, h); g.fill(); }
   if (fo > 0) { g.beginPath(); g.moveTo(cw, 0); g.lineTo(cw - fo, 0); g.lineTo(cw, h); g.fill(); }
+  // gain line (volume, keys, ducking; top = 1 or more)
+  if (P.length) {
+    g.strokeStyle = "#ffd84d";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    P.forEach((p, i) => g[i ? "lineTo" : "moveTo"]((p.t - c.start) * S.pps, 1 + (h - 2) * (1 - Math.min(1, p.v))));
+    g.stroke();
+  }
   return cv;
 }
 
