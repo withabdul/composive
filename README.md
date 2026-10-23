@@ -8,12 +8,34 @@ bun bin/composive.ts dev example            # editor at http://localhost:9999, l
 bun bin/composive.ts export example -o out.mp4   # needs ffmpeg on PATH and Chrome (or CHROME_PATH)
 bun bin/composive.ts export example -o hook.mp4 --scene 001-hook   # one scene, with the global tracks under it
 bun bin/composive.ts export example --fast-perf   # 8 Chrome processes render at once (default 4, --low-perf = 1): faster, more CPU and RAM
+bun bin/composive.ts check example                # find what breaks the editor or the export (--json for tools)
 ```
 
 Projects live in `projects/`; a bare name like `example` means `projects/example` (a path works too).
 Without a project (`composive dev`), a menu lists `projects/` (last edited first): type to search,
 `Up`/`Down` to move, `Enter` to open, `Esc` to cancel.
 `example` is a small demo.
+
+## Check a project
+
+`composive check <project>` reads the files (no server, no browser) and lists problems by file. Exit code 1
+when there is an error, so a script or an AI can run it after each edit. `--json` prints
+`{ project, errors, warnings, issues: [{ level, file, at, msg }] }` (`at` = track and clip, e.g. `V1 clip 2 (c1)`).
+
+- Errors (the editor or the export breaks): invalid JSON, a missing `src`, template or transition type, an
+  unsupported file type, clips that overlap on a track, a bad `start` / `duration` / `offset` / `volume`, an
+  audio file on a video track (or an HTML clip or image on an audio track), a scene track id that starts with
+  `G`, two tracks with one id, a bad transition `ease` / `dir` / `color`, unsorted keys or a bad key `ease`,
+  an HTML clip that never sets `window.seek`, `composive.clip` without `/lib/composive.js`, `timeline`
+  without GSAP.
+- Warnings (it plays, but likely not as meant): a clip longer than its media (ffprobe), a prop or key not in
+  the clip's defaults (a typo), keys that mix numbers and colors, a transition cut short by the clip or scene
+  length, a scene folder name that is skipped, an empty scene, a `link` with one clip, a `range` after the end;
+  in HTML clips: timers or `requestAnimationFrame`, `gsap.to()` outside `tl`, `Math.random` / `Date.now`
+  (each export worker loads the page on its own, so frames can differ), CSS `translate` / `scale` / `rotate`
+  with GSAP, files loaded from the internet.
+
+The HTML checks read the source text, so they can miss a problem or flag code that is fine.
 
 ## Export from the editor
 

@@ -91,7 +91,7 @@ export function propsAt(c, defaults, local) {
 
 // Video and image clips get these props; x and y are the center, as fractions of the frame.
 // sx, sy stretch the width and height on top of scale.
-const MEDIA_PROPS = { x: 0.5, y: 0.5, scale: 1, sx: 1, sy: 1, rotation: 0, opacity: 1 };
+export const MEDIA_PROPS = { x: 0.5, y: 0.5, scale: 1, sx: 1, sy: 1, rotation: 0, opacity: 1 };
 
 function place(el, p) {
   el.style.transform = `translate(${(p.x - 0.5) * 100}%, ${(p.y - 0.5) * 100}%) rotate(${p.rotation}deg) scale(${p.scale * p.sx}, ${p.scale * p.sy})`;
